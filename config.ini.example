@@ -1,0 +1,44 @@
+; ============================================================
+; FolderJump — 配置文件模板
+; 复制为 config.ini 并修改配置
+; ============================================================
+
+[general]
+; 触发热键（AHK 格式：^=Ctrl, !=Alt, +=Shift, #=Win）
+hotkey=^g
+; 路径刷新间隔（毫秒）
+poll_interval=500
+; 热键防抖间隔（毫秒，防止快速重复触发）
+debounce_ms=300
+; 菜单自动关闭时间（秒）
+auto_close_timeout=10
+; UI 主题（dark / light）
+theme=dark
+
+[adapters]
+; 启用 Windows Explorer 支持
+enable_explorer=1
+; 启用 Total Commander 支持
+enable_totalcmd=1
+; 启用 Directory Opus 支持
+enable_dopus=1
+; 启用 XYplorer 支持
+enable_xyplorer=0
+
+[ui]
+; 显示来源标签（如 "Explorer", "TC (左)"）
+show_source_label=1
+; 列表最大显示项数
+max_items=12
+; 排序方式（recent = 最近访问, alphabetical = 字母顺序）
+sort_by=recent
+; 菜单位置（below_window = 窗口下方, center = 屏幕中央, cursor = 鼠标位置）
+position=below_window
+
+[log]
+; 日志级别（DEBUG / INFO / WARN / ERROR）
+log_level=INFO
+; 单文件最大字节数（1MB = 1048576）
+log_max_size=1048576
+; 保留的历史日志文件数
+log_max_files=3
