@@ -3,7 +3,7 @@
 ; 系统托盘图标与右键菜单
 ; ============================================================
 
-#IncludeOnce "%A_ScriptDir%\lib\log_manager.ahk"
+#Include "%A_ScriptDir%\lib\log_manager.ahk"
 
 ; 初始化托盘
 TrayInit(*) {
@@ -23,7 +23,7 @@ TrayInit(*) {
     A_TrayMenu.Add("退出", TrayExit)
 
     ; 设置托盘提示
-    TraySetToolTip("FolderJump`n按 Ctrl+G 触发")
+    A_IconTip := "FolderJump`n按 Ctrl+G 触发"
 
     ; 左键单击显示提示
     A_TrayMenu.Default := "显示提示"

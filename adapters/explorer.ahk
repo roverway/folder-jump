@@ -3,8 +3,8 @@
 ; Windows Explorer 路径获取与跳转适配器
 ; ============================================================
 
-#IncludeOnce "%A_ScriptDir%\lib\log_manager.ahk"
-#IncludeOnce "%A_ScriptDir%\lib\utils.ahk"
+#Include "%A_ScriptDir%\lib\log_manager.ahk"
+#Include "%A_ScriptDir%\lib\utils.ahk"
 
 ; 收集所有 Explorer 窗口路径
 CollectExplorerPaths() {

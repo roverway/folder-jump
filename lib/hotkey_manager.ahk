@@ -3,7 +3,7 @@
 ; 热键注册、上下文检测、防抖
 ; ============================================================
 
-#IncludeOnce "%A_ScriptDir%\lib\log_manager.ahk"
+#Include "%A_ScriptDir%\lib\log_manager.ahk"
 
 ; 上下文检测
 DetectContext(activeClass, activeTitle) {

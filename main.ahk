@@ -14,12 +14,12 @@ Persistent  ; 保持脚本常驻运行
 ; ============================================================
 ; 模块加载
 ; ============================================================
-#IncludeOnce "%A_ScriptDir%\lib\log_manager.ahk"
-#IncludeOnce "%A_ScriptDir%\lib\config_manager.ahk"
-#IncludeOnce "%A_ScriptDir%\lib\tray_manager.ahk"
-#IncludeOnce "%A_ScriptDir%\lib\hotkey_manager.ahk"
-#IncludeOnce "%A_ScriptDir%\lib\window_monitor.ahk"
-#IncludeOnce "%A_ScriptDir%\lib\selection_ui.ahk"
+#Include "%A_ScriptDir%\lib\log_manager.ahk"
+#Include "%A_ScriptDir%\lib\config_manager.ahk"
+#Include "%A_ScriptDir%\lib\tray_manager.ahk"
+#Include "%A_ScriptDir%\lib\hotkey_manager.ahk"
+#Include "%A_ScriptDir%\lib\window_monitor.ahk"
+#Include "%A_ScriptDir%\lib\selection_ui.ahk"
 
 ; ============================================================
 ; 全局状态

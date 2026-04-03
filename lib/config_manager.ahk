@@ -3,7 +3,7 @@
 ; 配置管理模块（INI 文件读取）
 ; ============================================================
 
-#IncludeOnce "%A_ScriptDir%\lib\log_manager.ahk"
+#Include "%A_ScriptDir%\lib\log_manager.ahk"
 
 ; 加载配置
 LoadConfig() {

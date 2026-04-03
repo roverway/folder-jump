@@ -3,8 +3,8 @@
 ; Total Commander 双面板路径获取与跳转
 ; ============================================================
 
-#IncludeOnce "%A_ScriptDir%\lib\log_manager.ahk"
-#IncludeOnce "%A_ScriptDir%\lib\utils.ahk"
+#Include "%A_ScriptDir%\lib\log_manager.ahk"
+#Include "%A_ScriptDir%\lib\utils.ahk"
 
 ; 收集 Total Commander 双面板路径
 ; 返回: PathEntry[] 数组，包含左/右面板路径

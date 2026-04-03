@@ -3,8 +3,8 @@
 ; Directory Opus 多标签页路径获取与跳转
 ; ============================================================
 
-#IncludeOnce "%A_ScriptDir%\lib\log_manager.ahk"
-#IncludeOnce "%A_ScriptDir%\lib\utils.ahk"
+#Include "%A_ScriptDir%\lib\log_manager.ahk"
+#Include "%A_ScriptDir%\lib\utils.ahk"
 
 ; 收集 Directory Opus 所有标签页路径
 ; 返回: PathEntry[] 数组
@@ -50,6 +50,8 @@ CollectDOpusPaths() {
                 }
             }
         }
+    } catch as err {
+        LogWarn("Directory Opus tab 类路径收集失败: " err.Message)
     }
 
     LogDebug("Directory Opus 路径收集: " paths.Length " 个标签")

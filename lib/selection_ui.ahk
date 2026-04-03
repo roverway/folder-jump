@@ -3,8 +3,8 @@
 ; 浮动菜单 GUI（键盘导航、自动关闭）
 ; ============================================================
 
-#IncludeOnce "%A_ScriptDir%\lib\log_manager.ahk"
-#IncludeOnce "%A_ScriptDir%\lib\path_switcher.ahk"
+#Include "%A_ScriptDir%\lib\log_manager.ahk"
+#Include "%A_ScriptDir%\lib\path_switcher.ahk"
 
 ; 主题配色
 g_Themes := {
@@ -52,15 +52,15 @@ ShowPathSelector(context, activeHwnd) {
 
     ; 选择主题
     themeName := g_Config.theme
-    theme := g_Themes.HasOwnProp(themeName) ? g_Themes[themeName] : g_Themes.dark
+    theme := g_Themes.HasOwnProp(themeName) ? g_Themes.%themeName% : g_Themes.dark
 
     ; 创建 GUI
-    gui := Gui("+AlwaysOnTop +ToolWindow -Caption +Border")
-    gui.BackColor := theme.bg
+    pathGui := Gui("+AlwaysOnTop +ToolWindow -Caption +Border")
+    pathGui.BackColor := theme.bg
 
     ; 标题栏
     titleColor := theme.text
-    gui.Add("Text", "x5 y5 w390 Center c" titleColor, "FolderJump - 选择目标文件夹")
+    pathGui.Add("Text", "x5 y5 w390 Center c" titleColor, "FolderJump - 选择目标文件夹")
 
     ; 构建列表项
     items := []
@@ -86,12 +86,12 @@ ShowPathSelector(context, activeHwnd) {
 
     ; 路径列表（ListBox）
     listHeight := Min(count * itemHeight, maxListHeight)
-    listBox := gui.Add("ListBox", "x5 y30 w390 h" listHeight " vPathList", items)
+    listBox := pathGui.Add("ListBox", "x5 y30 w390 h" listHeight " vPathList", items)
     listBox.Choose(1)
 
     ; 底部提示
     hintColor := theme.hint
-    gui.Add("Text", "x5 y+" 5 " w390 Center c" hintColor, "↑↓ 选择  |  Enter 确认  |  Esc 取消")
+    pathGui.Add("Text", "x5 y+" 5 " w390 Center c" hintColor, "↑↓ 选择  |  Enter 确认  |  Esc 取消")
 
     ; 计算弹出位置
     popupX := wx
@@ -106,22 +106,25 @@ ShowPathSelector(context, activeHwnd) {
     }
 
     ; 显示窗口
-    gui.Show("x" popupX " y" popupY)
+    pathGui.Show("x" popupX " y" popupY)
 
-    ; 保存 GUI 引用
-    g_CurrentGui := gui
+    ; 保存 GUI 引用和原始活动窗口句柄（用于后续跳转）
+    g_CurrentGui := pathGui
+    pathGui.targetHwnd := activeHwnd
 
     ; 绑定键盘事件
-    gui.OnEvent("Escape", GuiEscape)
-
-    ; 失焦自动关闭
-    gui.OnEvent("LoseFocus", GuiLoseFocus)
+    pathGui.OnEvent("Escape", GuiEscape)
 
     ; 超时自动关闭
     timeout := g_Config.auto_close_timeout * 1000
-    autoCloseFn := GuiAutoClose.Bind(gui)
+    autoCloseFn := GuiAutoClose.Bind(pathGui)
     SetTimer(autoCloseFn, -timeout)
-    gui.autoCloseTimer := autoCloseFn
+    pathGui.autoCloseTimer := autoCloseFn
+
+    ; 失焦检测定时器（每 200ms 检查一次）
+    focusCheckFn := CheckFocusClose.Bind(pathGui)
+    SetTimer(focusCheckFn, 200)
+    pathGui.focusCheckTimer := focusCheckFn
 
     ; 设置 ListBox 键盘事件
     listBox.OnEvent("DoubleClick", ListBoxConfirm)
@@ -133,19 +136,21 @@ ShowPathSelector(context, activeHwnd) {
     enterHook.Start()
 
     ; 保存引用以便清理
-    gui.enterHook := enterHook
-    gui.selectedIndex := 0
+    pathGui.enterHook := enterHook
+    pathGui.selectedIndex := 0
 }
 
 ; ListBox 确认事件（双击时触发）
 ; 执行路径跳转并关闭 GUI
 ListBoxConfirm(GuiCtrlObj, *) {
     global g_CurrentGui, g_PathCache
-    selectedIndex := GuiCtrlObj.Choice
+    selectedIndex := GuiCtrlObj.Value
     if (selectedIndex > 0 && selectedIndex <= g_PathCache.Length) {
         entry := g_PathCache[selectedIndex]
         LogInfo("用户选择路径(双击): " entry.path " [" entry.label "]")
-        ExecutePathSwitch(entry)
+        ; 使用保存的目标窗口句柄，而不是当前活动窗口（因为当前是 FolderJump GUI）
+        targetHwnd := g_CurrentGui.HasOwnProp("targetHwnd") ? g_CurrentGui.targetHwnd : 0
+        ExecutePathSwitch(entry, targetHwnd)
     }
     CleanupGui(g_CurrentGui)
 }
@@ -155,7 +160,7 @@ ListBoxConfirm(GuiCtrlObj, *) {
 ListBoxChange(GuiCtrlObj, *) {
     global g_CurrentGui
     if (IsSet(g_CurrentGui) && g_CurrentGui)
-        g_CurrentGui.selectedIndex := GuiCtrlObj.Choice
+        g_CurrentGui.selectedIndex := GuiCtrlObj.Value
 }
 
 ; Enter 键确认（通过 InputHook 捕获）
@@ -163,11 +168,13 @@ ListBoxChange(GuiCtrlObj, *) {
 ListBoxEnterPressed(listBox, *) {
     global g_CurrentGui, g_PathCache
     try {
-        selectedIndex := listBox.Choice
+        selectedIndex := listBox.Value
         if (selectedIndex > 0 && selectedIndex <= g_PathCache.Length) {
             entry := g_PathCache[selectedIndex]
             LogInfo("用户选择路径(Enter): " entry.path " [" entry.label "]")
-            ExecutePathSwitch(entry)
+            ; 使用保存的目标窗口句柄，而不是当前活动窗口（因为当前是 FolderJump GUI）
+            targetHwnd := g_CurrentGui.HasOwnProp("targetHwnd") ? g_CurrentGui.targetHwnd : 0
+            ExecutePathSwitch(entry, targetHwnd)
             CleanupGui(g_CurrentGui)
         }
     }
@@ -180,34 +187,49 @@ GuiEscape(*) {
     CleanupGui(g_CurrentGui)
 }
 
-; 失焦关闭（通过 gui.OnEvent("LoseFocus") 绑定）
-GuiLoseFocus(*) {
+; 失焦检测定时器回调
+CheckFocusClose(pathGui) {
     global g_CurrentGui
-    LogDebug("GUI 失焦，自动关闭")
-    CleanupGui(g_CurrentGui)
+    try {
+        ; 检查 GUI 是否还存在
+        if (!WinExist("ahk_id " pathGui.Hwnd)) {
+            SetTimer(pathGui.focusCheckTimer, 0)
+            return
+        }
+        ; 检查 GUI 是否失去焦点（不是活动窗口）
+        if (WinActive("ahk_id " pathGui.Hwnd) != pathGui.Hwnd) {
+            LogDebug("GUI 失焦，自动关闭")
+            SetTimer(pathGui.focusCheckTimer, 0)
+            CleanupGui(g_CurrentGui)
+        }
+    }
 }
 
 ; 超时关闭（通过 SetTimer 一次性触发）
-GuiAutoClose(gui) {
+GuiAutoClose(pathGui) {
     global g_CurrentGui
     LogDebug("GUI 超时，自动关闭")
-    try gui.Destroy()
+    CleanupGui(g_CurrentGui)
 }
 
 ; 清理 GUI 资源（停止定时器、InputHook，销毁 GUI）
 ; 在所有关闭路径中统一调用，确保资源正确释放
-CleanupGui(gui) {
+CleanupGui(pathGui) {
     global g_CurrentGui
     ; 停止超时定时器（如果存在）
-    if (IsSet(gui) && gui && gui.HasOwnProp("autoCloseTimer")) {
-        try SetTimer(gui.autoCloseTimer, 0)
+    if (IsSet(pathGui) && pathGui && pathGui.HasOwnProp("autoCloseTimer")) {
+        try SetTimer(pathGui.autoCloseTimer, 0)
+    }
+    ; 停止焦点检测定时器（如果存在）
+    if (IsSet(pathGui) && pathGui && pathGui.HasOwnProp("focusCheckTimer")) {
+        try SetTimer(pathGui.focusCheckTimer, 0)
     }
     ; 停止 InputHook（如果存在）
-    if (IsSet(gui) && gui && gui.HasOwnProp("enterHook")) {
-        try gui.enterHook.Stop()
+    if (IsSet(pathGui) && pathGui && pathGui.HasOwnProp("enterHook")) {
+        try pathGui.enterHook.Stop()
     }
     ; 销毁 GUI
-    try gui.Destroy()
+    try pathGui.Destroy()
     ; 清除全局引用
     g_CurrentGui := ""
 }

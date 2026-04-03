@@ -3,8 +3,8 @@
 ; 定时轮询窗口状态，维护路径缓存
 ; ============================================================
 
-#IncludeOnce "%A_ScriptDir%\lib\log_manager.ahk"
-#IncludeOnce "%A_ScriptDir%\lib\path_collector.ahk"
+#Include "%A_ScriptDir%\lib\log_manager.ahk"
+#Include "%A_ScriptDir%\lib\path_collector.ahk"
 
 ; 全局路径缓存
 g_PathCache := []
