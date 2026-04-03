@@ -13,18 +13,26 @@ CollectAllPaths() {
     global g_Config
     allPaths := []
 
+    LogInfo("适配器状态 - Explorer: " g_Config.enable_explorer ", TC: " g_Config.enable_totalcmd ", DOpus: " g_Config.enable_dopus)
+
     ; 1. 收集 Explorer 路径
     if (g_Config.enable_explorer) {
+        LogInfo("开始收集 Explorer 路径...")
         explorerPaths := CollectExplorerPaths()
         for p in explorerPaths
             allPaths.Push(p)
     }
 
     ; 2. 收集 Total Commander 路径
+    LogInfo("检查 TC 适配器: enable_totalcmd = " g_Config.enable_totalcmd)
     if (g_Config.enable_totalcmd) {
+        LogInfo("开始收集 Total Commander 路径...")
         tcPaths := CollectTotalCmdPaths()
+        LogInfo("TC 路径收集完成，共 " tcPaths.Length " 个")
         for p in tcPaths
             allPaths.Push(p)
+    } else {
+        LogInfo("TC 适配器已禁用")
     }
 
     ; 3. 收集 Directory Opus 路径

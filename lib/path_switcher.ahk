@@ -39,7 +39,16 @@ ExecutePathSwitch(entry, targetHwnd := 0) {
         return
     }
 
-    LogInfo("执行路径跳转: " entry.path " [" entry.label "]")
+    LogInfo("执行路径跳转: " entry.path " [" entry.label "], 来源: " entry.source)
+
+    ; 特殊处理：如果当前不是 TC 窗口但选择的是 TC 来源的路径，激活 TC 窗口
+    if (entry.source = "totalcmd" && activeClass != "TTOTAL_CMD") {
+        if (entry.hwnd && WinExist("ahk_id " entry.hwnd)) {
+            targetHwnd := entry.hwnd
+            activeClass := WinGetClass(targetHwnd)  ; 更新窗口类名
+            LogInfo("切换到 TC 窗口: " entry.hwnd ", 类名: " activeClass)
+        }
+    }
 
     ; 根据当前窗口类型选择跳转方式
     if (activeClass = "#32770") {
@@ -52,7 +61,8 @@ ExecutePathSwitch(entry, targetHwnd := 0) {
     }
     else if (activeClass = "TTOTAL_CMD") {
         ; Total Commander 模式
-        NavigateTotalCmd(targetHwnd, entry.path)
+        panel := entry.HasOwnProp("panel") ? entry.panel : "active"
+        NavigateTotalCmd(targetHwnd, entry.path, panel)
     }
     else if (activeClass = "dopus.lister" || activeClass = "dopus.tab") {
         ; Directory Opus 模式
