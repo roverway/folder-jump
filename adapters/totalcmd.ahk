@@ -133,9 +133,11 @@ NormalizeTCPathText(pathText) {
 }
 
 BuildTCLabel(panelPath) {
-    panelSide := panelPath.panelSide != "" ? panelPath.panelSide : "unknown"
-    panelRole := panelPath.panelRole != "" ? panelPath.panelRole : "panel"
-    return "TC (" panelRole "/" panelSide ")"
+    panelRole := panelPath.panelRole != "" ? panelPath.panelRole : ""
+    if (panelRole != "")
+        return "TC (" panelRole ")"
+
+    return "TC"
 }
 
 GetTCPathsViaWinGetText(hwnd) {

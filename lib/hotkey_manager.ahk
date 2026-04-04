@@ -6,20 +6,11 @@
 #Include "%A_ScriptDir%\lib\log_manager.ahk"
 
 DetectContext(activeHwnd, activeClass, activeTitle) {
-    if (activeClass = "CabinetWClass" || activeClass = "ExploreWClass")
-        return "explorer"
-
     if (activeClass = "#32770") {
         if (IsFileDialog(activeHwnd, activeTitle))
             return "dialog"
         return "none"
     }
-
-    if (activeClass = "TTOTAL_CMD")
-        return "totalcmd"
-
-    if (activeClass = "dopus.lister" || activeClass = "dopus.tab")
-        return "dopus"
 
     return "none"
 }
