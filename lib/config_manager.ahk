@@ -1,11 +1,10 @@
 ; ============================================================
-; Config Manager — FolderJump
-; 配置管理模块（INI 文件读取）
+; Config Manager - FolderJump
+; Load and reload INI configuration
 ; ============================================================
 
 #Include "%A_ScriptDir%\lib\log_manager.ahk"
 
-; 加载配置
 LoadConfig() {
     configPath := A_ScriptDir "\config.ini"
 
@@ -18,52 +17,44 @@ LoadConfig() {
         enable_explorer: IniRead(configPath, "adapters", "enable_explorer", 1),
         enable_totalcmd: IniRead(configPath, "adapters", "enable_totalcmd", 1),
         enable_dopus: IniRead(configPath, "adapters", "enable_dopus", 1),
-        enable_xyplorer: IniRead(configPath, "adapters", "enable_xyplorer", 0),
         show_source_label: IniRead(configPath, "ui", "show_source_label", 1),
         max_items: IniRead(configPath, "ui", "max_items", 12),
         sort_by: IniRead(configPath, "ui", "sort_by", "recent"),
         position: IniRead(configPath, "ui", "position", "below_window"),
-        ; 日志配置
         log_level: IniRead(configPath, "log", "log_level", "INFO"),
         log_max_size: IniRead(configPath, "log", "log_max_size", 1048576),
         log_max_files: IniRead(configPath, "log", "log_max_files", 3)
     }
 
-    ; 将字符串配置值转为数字
     cfg.poll_interval := Integer(cfg.poll_interval)
     cfg.debounce_ms := Integer(cfg.debounce_ms)
     cfg.auto_close_timeout := Integer(cfg.auto_close_timeout)
     cfg.enable_explorer := Integer(cfg.enable_explorer)
     cfg.enable_totalcmd := Integer(cfg.enable_totalcmd)
     cfg.enable_dopus := Integer(cfg.enable_dopus)
-    cfg.enable_xyplorer := Integer(cfg.enable_xyplorer)
     cfg.show_source_label := Integer(cfg.show_source_label)
     cfg.max_items := Integer(cfg.max_items)
     cfg.log_max_size := Integer(cfg.log_max_size)
     cfg.log_max_files := Integer(cfg.log_max_files)
 
-    ; 应用日志配置
     ApplyLogConfig(cfg.log_level, cfg.log_max_size, cfg.log_max_files)
 
-    LogInfo("配置已加载: " configPath)
+    LogInfo("Configuration loaded: " configPath)
     return cfg
 }
 
-; 应用日志配置
 ApplyLogConfig(levelStr, maxSize, maxFiles) {
     global g_LogConfig
-    
-    ; 将日志级别字符串转为数字
+
     levelMap := Map("DEBUG", 0, "INFO", 1, "WARN", 2, "ERROR", 3)
     g_LogConfig.level := levelMap.Has(levelStr) ? levelMap[levelStr] : 1
     g_LogConfig.maxSize := maxSize
     g_LogConfig.maxFiles := maxFiles
 }
 
-; 重新加载配置（配置变更后调用）
 ReloadConfig() {
     global g_Config
     g_Config := LoadConfig()
-    LogInfo("配置已重新加载")
+    LogInfo("Configuration reloaded")
     return g_Config
 }
