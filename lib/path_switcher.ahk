@@ -1,6 +1,6 @@
-; ============================================================
-; Path Switcher - FolderJump
-; Execute path switching based on the current window type
+﻿; ============================================================
+; 路径跳转模块 - FolderJump
+; 负责根据当前窗口类型执行路径跳转
 ; ============================================================
 
 #Include "%A_ScriptDir%\lib\log_manager.ahk"

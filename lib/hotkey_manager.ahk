@@ -1,6 +1,6 @@
-; ============================================================
-; Hotkey Manager - FolderJump
-; Register hotkeys, detect supported contexts, debounce triggers
+﻿; ============================================================
+; 热键管理模块 - FolderJump
+; 负责热键注册、上下文检测与防抖
 ; ============================================================
 
 #Include "%A_ScriptDir%\lib\log_manager.ahk"

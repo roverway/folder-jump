@@ -1,4 +1,4 @@
-# FolderJump 技术设计文档
+﻿# FolderJump 技术设计文档
 
 > 轻量级 Windows 文件管理器路径快速切换工具 — 复刻 Listary Ctrl+G 功能
 

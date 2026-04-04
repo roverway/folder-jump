@@ -1,4 +1,4 @@
-@echo off
+﻿@echo off
 REM ============================================================
 REM FolderJump Build Script
 REM 使用 Ahk2Exe 将 main.ahk 编译为独立 .exe

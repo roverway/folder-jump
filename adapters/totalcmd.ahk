@@ -1,6 +1,6 @@
-; ============================================================
-; Total Commander Adapter - FolderJump
-; Collect and navigate Total Commander panel paths
+﻿; ============================================================
+; Total Commander 适配器 - FolderJump
+; 负责获取与跳转 Total Commander 面板路径
 ; ============================================================
 
 #Include "%A_ScriptDir%\lib\log_manager.ahk"

@@ -1,10 +1,10 @@
-#Requires AutoHotkey v2.0
+﻿#Requires AutoHotkey v2.0
 #SingleInstance Force
 Persistent
 
 ; ============================================================
 ; FolderJump
-; Lightweight Windows path switcher inspired by Listary Ctrl+G
+; 轻量级 Windows 路径切换工具，复刻 Listary Ctrl+G 核心体验
 ; ============================================================
 
 #Include "%A_ScriptDir%\lib\log_manager.ahk"

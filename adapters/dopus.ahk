@@ -1,6 +1,6 @@
-; ============================================================
-; Directory Opus Adapter - FolderJump
-; Collect and navigate Directory Opus paths
+﻿; ============================================================
+; Directory Opus 适配器 - FolderJump
+; 负责获取与跳转 Directory Opus 路径
 ; ============================================================
 
 #Include "%A_ScriptDir%\lib\log_manager.ahk"

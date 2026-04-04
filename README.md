@@ -1,49 +1,48 @@
-# FolderJump
+﻿# FolderJump
 
-Windows 路径切换工具，使用 AutoHotkey v2 开发，复刻 Listary 的 `Ctrl+G` 功能。
+AutoHotkey v2 Windows 路径切换工具，核心体验参考 Listary 的 `Ctrl+G`。
 
 ## 当前行为
 
-FolderJump 目前针对文件对话框（如"打开"和"另存为"对话框）进行了优化。
-在支持的文件对话框中按 `Ctrl+G` 可打开选择器，其中列出从以下来源收集的路径：
+当前版本主要面向“打开 / 另存为”这类文件对话框。
+
+在受支持的文件对话框中按下 `Ctrl+G` 后，会弹出路径选择面板，列出当前已收集到的路径来源：
 
 - Windows Explorer
 - Total Commander
 - Directory Opus
 
-选择路径后，会将其应用到当前文件对话框。
+用户选择目标路径后，FolderJump 会把该路径应用到当前文件对话框。
 
-## 支持的来源
+## 当前支持的路径来源
 
-| 来源 | 路径收集方式 | 备注 |
+| 来源 | 路径获取方式 | 说明 |
 |---|---|---|
 | Windows Explorer | COM | 稳定 |
-| Total Commander | 内部窗口消息 | 标签目前显示 `active` / `inactive` |
-| Directory Opus | `DOpusRT /info ...,paths`，标题回退 | 优先使用官方接口 |
+| Total Commander | 内部窗口消息 | 列表标签当前显示 `active` / `inactive` |
+| Directory Opus | `DOpusRT /info ...,paths`，标题解析兜底 | 优先使用官方接口 |
 
-## 支持的触发上下文
+## 当前支持的触发场景
 
-运行时仅文件对话框会触发热键。
+运行时只在文件对话框中响应热键。
 
 ## 快速开始
 
 1. 安装 AutoHotkey v2。
-2. 将 `config.ini.example` 复制为 `config.ini`。
+2. 复制 `config.ini.example` 为 `config.ini`。
 3. 运行：
 
 ```cmd
 AutoHotkey64.exe main.ahk
 ```
 
-或编译为独立程序：
+或者编译：
 
 ```cmd
 build\build.bat
 ```
 
-## 配置
-
-示例：
+## 配置示例
 
 ```ini
 [general]
@@ -101,16 +100,16 @@ folder-jump/
     └── folder-jump.log
 ```
 
-## 已知限制
+## 当前限制
 
-- 热键激活有意限制为文件对话框。
-- Total Commander 左右面板推断未在 UI 中显示，因为当前启发式方法不够可靠。
-- 部分旧版或高度定制的对话框可能仍需要通用键盘回退方案。
+- 热键已刻意收紧为只在文件对话框中触发。
+- Total Commander 的左右侧推断目前仍是启发式，因此没有在 UI 中展示 `left/right`。
+- 某些较老或高度定制的文件对话框，仍可能退回到通用按键模拟。
 
 ## 日志
 
-运行时日志写入 `logs/folder-jump.log`。
+运行日志写入 `logs/folder-jump.log`。
 
-## 许可证
+## 许可
 
 MIT
