@@ -1,30 +1,40 @@
-; FolderJump configuration template
-; Copy this file to config.ini and adjust values as needed.
+; FolderJump 配置文件模板
+; 将此文件复制为 config.ini，然后根据需要调整配置值
 
 [general]
-; Hotkey in AHK format: ^=Ctrl, !=Alt, +=Shift, #=Win
+; 热键，AHK 格式：^=Ctrl, !=Alt, +=Shift, #=Win
 hotkey=^g
-; Path refresh interval in milliseconds
+; 路径刷新间隔（毫秒）
 poll_interval=500
-; Debounce interval in milliseconds
+; 热键防抖间隔（毫秒），防止快速重复触发
 debounce_ms=300
-; Auto close timeout for the selector UI in seconds
+; 选择器 UI 自动关闭超时时间（秒）
 auto_close_timeout=10
-; UI theme: dark or light
+; UI 主题：dark（深色）或 light（浅色）
 theme=dark
 
 [adapters]
+; 启用 Windows Explorer 支持
 enable_explorer=1
+; 启用 Total Commander 支持
 enable_totalcmd=1
+; 启用 Directory Opus 支持
 enable_dopus=1
 
 [ui]
+; 显示来源标签（如 "Explorer"、"TC (active)"）
 show_source_label=1
+; 列表最大显示项数
 max_items=12
+; 排序方式：recent（最近访问优先）或 alphabetical（按字母顺序）
 sort_by=recent
+; 菜单位置：below_window（窗口下方）、center（屏幕中央）、cursor（鼠标位置）
 position=below_window
 
 [log]
+; 日志级别：DEBUG / INFO / WARN / ERROR
 log_level=INFO
+; 单个日志文件最大字节数（1MB = 1048576）
 log_max_size=1048576
+; 保留的历史日志文件数量
 log_max_files=3
