@@ -7,6 +7,75 @@
 #Include "%A_ScriptDir%\lib\utils.ahk"
 
 CollectDOpusPaths() {
+    paths := CollectDOpusPathsViaDOpusRT()
+    if (paths.Length > 0)
+        return paths
+
+    LogWarn("Falling back to DOpus title parsing")
+    return CollectDOpusPathsFromTitles()
+}
+
+CollectDOpusPathsViaDOpusRT() {
+    paths := []
+    dopusrtPath := FindDOpusRT()
+    if (!dopusrtPath) {
+        LogWarn("DOpusRT not found")
+        return paths
+    }
+
+    tempFile := A_Temp "\folderjump-dopus-paths-" A_TickCount ".xml"
+
+    try {
+        RunWait('"' dopusrtPath '" /info "' tempFile '",paths', , "Hide")
+        if (!FileExist(tempFile)) {
+            LogWarn("DOpusRT did not produce a paths file")
+            return paths
+        }
+
+        xml := ComObject("Msxml2.DOMDocument.6.0")
+        xml.async := false
+        if (!xml.load(tempFile)) {
+            LogWarn("Failed to parse DOpusRT XML output")
+            return paths
+        }
+
+        for node in xml.selectNodes("//path[@active_tab]") {
+            try {
+                pathText := NormalizeDOpusPathCandidate(node.text)
+                if (!(pathText && DirExist(pathText)))
+                    continue
+
+                listerAttr := node.getAttribute("lister")
+                hwnd := ParseDOpusListerHandle(listerAttr)
+                side := node.getAttribute("side")
+                activeTab := node.getAttribute("active_tab")
+                label := BuildDOpusLabel(side, activeTab)
+
+                paths.Push({
+                    path: pathText,
+                    source: "dopus",
+                    label: label,
+                    hwnd: hwnd,
+                    timestamp: A_TickCount
+                })
+                LogInfo("Add DOpus path via DOpusRT: " pathText " [" label "]")
+            } catch as innerErr {
+                LogWarn("Failed to parse DOpusRT path entry: " innerErr.Message)
+            }
+        }
+    } catch as err {
+        LogWarn("DOpusRT path collection failed: " err.Message)
+    }
+
+    try {
+        if (FileExist(tempFile))
+            FileDelete(tempFile)
+    }
+
+    return paths
+}
+
+CollectDOpusPathsFromTitles() {
     paths := []
     seenHwnd := Map()
 
@@ -15,10 +84,10 @@ CollectDOpusPaths() {
             if (seenHwnd.Has(hwnd))
                 continue
             seenHwnd[hwnd] := true
-            AddDOpusPathEntry(paths, hwnd)
+            AddDOpusTitlePathEntry(paths, hwnd)
         }
     } catch as err {
-        LogWarn("Failed to collect Directory Opus lister paths: " err.Message)
+        LogWarn("Failed to collect DOpus lister paths from titles: " err.Message)
     }
 
     try {
@@ -26,20 +95,22 @@ CollectDOpusPaths() {
             if (seenHwnd.Has(hwnd))
                 continue
             seenHwnd[hwnd] := true
-            AddDOpusPathEntry(paths, hwnd)
+            AddDOpusTitlePathEntry(paths, hwnd)
         }
     } catch as err {
-        LogWarn("Failed to collect Directory Opus tab paths: " err.Message)
+        LogWarn("Failed to collect DOpus tab paths from titles: " err.Message)
     }
 
-    LogDebug("Collected Directory Opus paths: " paths.Length)
     return paths
 }
 
-AddDOpusPathEntry(paths, hwnd) {
-    path := ExtractPathFromDOpusWindow(hwnd)
+AddDOpusTitlePathEntry(paths, hwnd) {
+    title := ""
+    try title := WinGetTitle("ahk_id " hwnd)
+
+    path := ExtractPathFromDOpusTitle(title)
     if (!(path && DirExist(path))) {
-        LogDebug("Skip DOpus window without valid path: hwnd=" hwnd)
+        LogDebug("Skip DOpus title path candidate: hwnd=" hwnd ", title=" title)
         return
     }
 
@@ -50,99 +121,61 @@ AddDOpusPathEntry(paths, hwnd) {
         hwnd: hwnd,
         timestamp: A_TickCount
     })
-    LogInfo("Add DOpus path: " path)
+    LogInfo("Add DOpus path via title: " path)
 }
 
-ExtractPathFromDOpusWindow(hwnd) {
-    controlPath := ExtractPathFromDOpusControls(hwnd)
-    if (controlPath)
-        return controlPath
+ParseDOpusListerHandle(listerAttr) {
+    if (!listerAttr)
+        return 0
 
-    windowTextPath := ExtractPathFromDOpusWindowText(hwnd)
-    if (windowTextPath)
-        return windowTextPath
+    if (SubStr(listerAttr, 1, 2) = "0x")
+        return Integer(listerAttr)
 
-    title := ""
-    try title := WinGetTitle("ahk_id " hwnd)
-
-    return ExtractPathFromDOpusTitle(title)
+    return Integer("0x" listerAttr)
 }
 
-ExtractPathFromDOpusControls(hwnd) {
-    try {
-        controls := WinGetControls("ahk_id " hwnd)
-    } catch as err {
-        LogWarn("Failed to inspect DOpus controls: " err.Message)
-        return ""
-    }
+BuildDOpusLabel(side, activeTab) {
+    sideLabel := ""
+    if (side = "0")
+        sideLabel := "left"
+    else if (side = "1")
+        sideLabel := "right"
 
-    candidates := []
-    for control in controls {
-        text := GetDOpusControlTextSafe(control, hwnd)
-        if (!text)
-            continue
+    if (sideLabel != "")
+        return "DOpus (" sideLabel ")"
 
-        foundPaths := ExtractExistingPathsFromText(text)
-        for path in foundPaths
-            candidates.Push(path)
-    }
+    if (activeTab != "")
+        return "DOpus (active)"
 
-    return SelectBestDOpusPath(candidates)
+    return "DOpus"
 }
 
-ExtractPathFromDOpusWindowText(hwnd) {
-    oldSetting := A_DetectHiddenText
-    try {
-        DetectHiddenText(true)
-        allText := WinGetText("ahk_id " hwnd)
-    } catch as err {
-        LogWarn("Failed to read DOpus window text: " err.Message)
-        DetectHiddenText(oldSetting)
-        return ""
-    }
-    DetectHiddenText(oldSetting)
-
-    candidates := ExtractExistingPathsFromText(allText)
-    return SelectBestDOpusPath(candidates)
-}
-
-ExtractExistingPathsFromText(text) {
-    candidates := []
-    seen := Map()
-
-    for line in StrSplit(text, "`n", "`r") {
-        candidate := ExtractPathCandidate(line)
-        if (!(candidate && DirExist(candidate)))
-            continue
-
-        normalized := StrLower(candidate)
-        if (seen.Has(normalized))
-            continue
-
-        seen[normalized] := true
-        candidates.Push(candidate)
-    }
-
-    return candidates
-}
-
-ExtractPathCandidate(text) {
-    text := Trim(text, " `t`r`n")
-    if (!text)
+ExtractPathFromDOpusTitle(title) {
+    title := Trim(title, " `t`r`n")
+    if (!title)
         return ""
 
-    text := RegExReplace(text, "\s+-\s+Directory Opus$")
-    text := RegExReplace(text, "\s+-\s+Opus$")
-    text := RegExReplace(text, "[>\r\n]+$")
-    text := Trim(text)
+    title := RegExReplace(title, "\s+-\s+Directory Opus$")
+    title := RegExReplace(title, "\s+-\s+Opus$")
+    title := Trim(title)
 
-    if (RegExMatch(text, "i)([A-Z]:\\[^<>:\x22|?*\r\n]+)", &match))
-        return NormalizeDOpusPathCandidate(match[1])
+    candidate := NormalizeDOpusPathCandidate(title)
+    if (candidate && DirExist(candidate))
+        return candidate
 
-    if (RegExMatch(text, "(\\\\[^\\\/:*?\x22<>|\r\n]+\\[^<>:\x22|?*\r\n]+)", &uncMatch))
-        return NormalizeDOpusPathCandidate(uncMatch[1])
+    if (RegExMatch(title, "i)([A-Z]:\\[^<>:\x22|?*\r\n]+)", &match)) {
+        candidate := NormalizeDOpusPathCandidate(match[1])
+        if (candidate && DirExist(candidate))
+            return candidate
+    }
 
-    return NormalizeDOpusPathCandidate(text)
+    if (RegExMatch(title, "(\\\\[^\\\/:*?\x22<>|\r\n]+\\[^<>:\x22|?*\r\n]+)", &uncMatch)) {
+        candidate := NormalizeDOpusPathCandidate(uncMatch[1])
+        if (candidate && DirExist(candidate))
+            return candidate
+    }
+
+    return ""
 }
 
 NormalizeDOpusPathCandidate(path) {
@@ -153,34 +186,6 @@ NormalizeDOpusPathCandidate(path) {
         path := SubStr(path, 1, -1)
 
     return path
-}
-
-SelectBestDOpusPath(candidates) {
-    bestPath := ""
-    for path in candidates {
-        if (!(path && DirExist(path)))
-            continue
-
-        if (StrLen(path) > StrLen(bestPath))
-            bestPath := path
-    }
-
-    return bestPath
-}
-
-ExtractPathFromDOpusTitle(title) {
-    candidate := ExtractPathCandidate(title)
-    if (candidate && DirExist(candidate))
-        return candidate
-    return ""
-}
-
-GetDOpusControlTextSafe(control, hwnd) {
-    try {
-        return ControlGetText(control, "ahk_id " hwnd)
-    } catch {
-        return ""
-    }
 }
 
 NavigateDOpus(hwnd, targetPath) {

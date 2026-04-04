@@ -48,13 +48,50 @@ ExecutePathSwitch(entry, targetHwnd := 0) {
 }
 
 SwitchFileDialog(hwnd, targetPath) {
-    if (TryNavigateFileDialog(hwnd, targetPath))
+    if (TryNavigateFileDialogByControl(hwnd, targetPath))
+        return true
+
+    if (TryNavigateFileDialogByShortcut(hwnd, targetPath))
         return true
 
     return SwitchFileDialogFallback(hwnd, targetPath)
 }
 
-TryNavigateFileDialog(hwnd, targetPath) {
+TryNavigateFileDialogByControl(hwnd, targetPath) {
+    LogDebug("Try file dialog control-level navigation")
+
+    try {
+        if (!ActivateTargetWindow(hwnd))
+            return false
+
+        targetControl := FindFileDialogEditableControl(hwnd)
+        if (!targetControl) {
+            LogDebug("No suitable file dialog control found for direct input")
+            return false
+        }
+
+        if (!SetDialogControlText(hwnd, targetControl, targetPath))
+            return false
+
+        if (!SubmitDialogControl(hwnd, targetControl))
+            return false
+
+        if (WaitForFileDialogPath(hwnd, targetPath)) {
+            LogInfo("File dialog control-level navigation succeeded: control=" targetControl ", path=" targetPath)
+            return true
+        }
+
+        LogWarn("File dialog control-level navigation could not verify result")
+        return false
+    } catch as err {
+        LogWarn("File dialog control-level navigation failed: " err.Message)
+        return false
+    }
+}
+
+TryNavigateFileDialogByShortcut(hwnd, targetPath) {
+    LogDebug("Try file dialog shortcut-level navigation")
+
     if (!ActivateTargetWindow(hwnd))
         return false
 
@@ -75,10 +112,13 @@ TryNavigateFileDialogWithShortcut(hwnd, targetPath, shortcut) {
         Send(shortcut)
         Sleep(200)
 
-        focusedControlAfter := GetFocusedControlSafe(hwnd)
-        LogDebug("File dialog shortcut attempted: " shortcut ", before=" focusedControlBefore ", after=" focusedControlAfter)
+        targetControl := FindPreferredDialogControlAfterShortcut(hwnd)
+        if (!targetControl)
+            targetControl := GetFocusedControlSafe(hwnd)
 
-        if (!SetFocusedControlText(hwnd, focusedControlAfter, targetPath)) {
+        LogDebug("File dialog shortcut attempted: " shortcut ", before=" focusedControlBefore ", target=" targetControl)
+
+        if (!SetDialogControlText(hwnd, targetControl, targetPath)) {
             A_Clipboard := targetPath
             if (!ClipWait(1))
                 LogWarn("Clipboard write timed out while targeting file dialog")
@@ -92,12 +132,12 @@ TryNavigateFileDialogWithShortcut(hwnd, targetPath, shortcut) {
         Send("{Enter}")
 
         if (WaitForFileDialogPath(hwnd, targetPath)) {
-            LogInfo("File dialog navigation succeeded via shortcut: " shortcut ", path=" targetPath)
+            LogInfo("File dialog shortcut navigation succeeded: shortcut=" shortcut ", path=" targetPath)
             RestoreClipboard(savedClipboard)
             return true
         }
     } catch as err {
-        LogWarn("File dialog shortcut navigation failed: " shortcut ", error=" err.Message)
+        LogWarn("File dialog shortcut navigation failed: shortcut=" shortcut ", error=" err.Message)
     }
 
     RestoreClipboard(savedClipboard)
@@ -105,7 +145,7 @@ TryNavigateFileDialogWithShortcut(hwnd, targetPath, shortcut) {
 }
 
 SwitchFileDialogFallback(hwnd, targetPath) {
-    LogDebug("Start file dialog fallback: hwnd=" hwnd ", path=" targetPath)
+    LogDebug("Start file dialog generic fallback: hwnd=" hwnd ", path=" targetPath)
 
     savedClipboard := SaveClipboard()
 
@@ -130,12 +170,12 @@ SwitchFileDialogFallback(hwnd, targetPath) {
         Send("{Enter}")
 
         if (WaitForFileDialogPath(hwnd, targetPath)) {
-            LogInfo("File dialog fallback succeeded: " targetPath)
+            LogInfo("File dialog generic fallback succeeded: " targetPath)
             RestoreClipboard(savedClipboard)
             return true
         }
 
-        LogWarn("File dialog fallback could not verify navigation result")
+        LogWarn("File dialog generic fallback could not verify navigation result")
         RestoreClipboard(savedClipboard)
         return false
     } catch as err {
@@ -157,6 +197,100 @@ ActivateTargetWindow(hwnd) {
     return true
 }
 
+FindFileDialogEditableControl(hwnd) {
+    controls := GetDialogControlsSafe(hwnd)
+    if (controls.Length = 0)
+        return ""
+
+    bestAddressEdit := ""
+    bestGenericEdit := ""
+
+    for control in controls {
+        className := GetFileDialogControlClassSafe(control, hwnd)
+        text := GetFileDialogControlTextSafe(control, hwnd)
+        loweredText := StrLower(text)
+        loweredClass := StrLower(className)
+
+        if (InStr(loweredClass, "edit")) {
+            if (LooksLikeAddressBarControl(control, className, loweredText)) {
+                if (!bestAddressEdit)
+                    bestAddressEdit := control
+            } else if (!bestGenericEdit) {
+                bestGenericEdit := control
+            }
+        }
+    }
+
+    if (bestAddressEdit)
+        return bestAddressEdit
+
+    return bestGenericEdit
+}
+
+FindPreferredDialogControlAfterShortcut(hwnd) {
+    focusedControl := GetFocusedControlSafe(hwnd)
+    if (focusedControl && IsEditableDialogControl(hwnd, focusedControl))
+        return focusedControl
+
+    return FindFileDialogEditableControl(hwnd)
+}
+
+LooksLikeAddressBarControl(control, className, loweredText) {
+    loweredControl := StrLower(control)
+    loweredClass := StrLower(className)
+
+    if (InStr(loweredControl, "breadcrumb") || InStr(loweredClass, "breadcrumb"))
+        return true
+    if (InStr(loweredControl, "toolbarwindow32") || InStr(loweredClass, "toolbarwindow32"))
+        return true
+    if (InStr(loweredText, "address") || InStr(loweredText, "location"))
+        return true
+
+    return false
+}
+
+IsEditableDialogControl(hwnd, control) {
+    className := GetFileDialogControlClassSafe(control, hwnd)
+    return InStr(StrLower(className), "edit")
+}
+
+SetDialogControlText(hwnd, control, targetPath) {
+    if (!control)
+        return false
+
+    try {
+        ControlFocus(control, "ahk_id " hwnd)
+        Sleep(50)
+        ControlSetText(targetPath, control, "ahk_id " hwnd)
+        LogDebug("Set file dialog control text: " control)
+        return true
+    } catch as err {
+        LogWarn("Failed to set file dialog control text: " control ", error=" err.Message)
+        return false
+    }
+}
+
+SubmitDialogControl(hwnd, control) {
+    try {
+        ControlFocus(control, "ahk_id " hwnd)
+        Sleep(50)
+        ControlSend("{Enter}", control, "ahk_id " hwnd)
+        return true
+    } catch as err {
+        LogWarn("Failed to submit dialog control: " control ", error=" err.Message)
+        return false
+    }
+}
+
+GetDialogControlsSafe(hwnd) {
+    try {
+        return WinGetControls("ahk_id " hwnd)
+    } catch as err {
+        LogWarn("Failed to enumerate dialog controls: " err.Message)
+        return []
+    }
+}
+
 GetFocusedControlSafe(hwnd) {
     try {
         return ControlGetFocus("ahk_id " hwnd)
@@ -165,18 +299,11 @@ GetFocusedControlSafe(hwnd) {
     }
 }
 
-SetFocusedControlText(hwnd, focusedControl, targetPath) {
-    if (!focusedControl)
-        return false
-
+GetFileDialogControlClassSafe(control, hwnd) {
     try {
-        ControlFocus(focusedControl, "ahk_id " hwnd)
-        ControlSetText(targetPath, focusedControl, "ahk_id " hwnd)
-        LogDebug("Set file dialog control text: " focusedControl)
-        return true
-    } catch as err {
-        LogWarn("Failed to set file dialog control text: " focusedControl ", error=" err.Message)
-        return false
+        return ControlGetClassNN(control, "ahk_id " hwnd)
+    } catch {
+        return control
     }
 }
 
@@ -199,15 +326,12 @@ WaitForFileDialogPath(hwnd, targetPath) {
 }
 
 FileDialogContainsPath(hwnd, normalizedTarget) {
-    try {
-        controls := WinGetControls("ahk_id " hwnd)
-    } catch as err {
-        LogWarn("Failed to enumerate file dialog controls: " err.Message)
+    controls := GetDialogControlsSafe(hwnd)
+    if (controls.Length = 0)
         return false
-    }
 
     for control in controls {
-        text := GetControlTextSafe(control, hwnd)
+        text := GetFileDialogControlTextSafe(control, hwnd)
         if (!text)
             continue
 
@@ -219,7 +343,7 @@ FileDialogContainsPath(hwnd, normalizedTarget) {
     return false
 }
 
-GetControlTextSafe(control, hwnd) {
+GetFileDialogControlTextSafe(control, hwnd) {
     try {
         return ControlGetText(control, "ahk_id " hwnd)
     } catch {
