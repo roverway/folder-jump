@@ -21,9 +21,6 @@ DetectContext(activeHwnd, activeClass, activeTitle) {
     if (activeClass = "dopus.lister" || activeClass = "dopus.tab")
         return "dopus"
 
-    if (activeClass = "XYplorer")
-        return "xyplorer"
-
     return "none"
 }
 

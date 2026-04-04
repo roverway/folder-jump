@@ -1,102 +1,209 @@
 ; ============================================================
-; Directory Opus Adapter — FolderJump
-; Directory Opus 多标签页路径获取与跳转
+; Directory Opus Adapter - FolderJump
+; Collect and navigate Directory Opus paths
 ; ============================================================
 
 #Include "%A_ScriptDir%\lib\log_manager.ahk"
 #Include "%A_ScriptDir%\lib\utils.ahk"
 
-; 收集 Directory Opus 所有标签页路径
-; 返回: PathEntry[] 数组
-; 方法: 窗口枚举 + 标题解析
 CollectDOpusPaths() {
     paths := []
+    seenHwnd := Map()
 
-    ; 方法：窗口枚举 + 标题解析
     try {
         for hwnd in WinGetList("ahk_class dopus.lister") {
-            try {
-                title := WinGetTitle(hwnd)
-                path := ExtractPathFromDOpusTitle(title)
-                if (path && DirExist(path)) {
-                    paths.Push({
-                        path: path,
-                        source: "dopus",
-                        label: "DOpus",
-                        hwnd: hwnd,
-                        timestamp: A_TickCount
-                    })
-                }
-            }
+            if (seenHwnd.Has(hwnd))
+                continue
+            seenHwnd[hwnd] := true
+            AddDOpusPathEntry(paths, hwnd)
         }
     } catch as err {
-        LogWarn("Directory Opus 路径收集失败: " err.Message)
+        LogWarn("Failed to collect Directory Opus lister paths: " err.Message)
     }
 
-    ; 也检查 dopus.tab 类（多标签页）
     try {
         for hwnd in WinGetList("ahk_class dopus.tab") {
-            try {
-                title := WinGetTitle(hwnd)
-                path := ExtractPathFromDOpusTitle(title)
-                if (path && DirExist(path)) {
-                    paths.Push({
-                        path: path,
-                        source: "dopus",
-                        label: "DOpus",
-                        hwnd: hwnd,
-                        timestamp: A_TickCount
-                    })
-                }
-            }
+            if (seenHwnd.Has(hwnd))
+                continue
+            seenHwnd[hwnd] := true
+            AddDOpusPathEntry(paths, hwnd)
         }
     } catch as err {
-        LogWarn("Directory Opus tab 类路径收集失败: " err.Message)
+        LogWarn("Failed to collect Directory Opus tab paths: " err.Message)
     }
 
-    LogDebug("Directory Opus 路径收集: " paths.Length " 个标签")
+    LogDebug("Collected Directory Opus paths: " paths.Length)
     return paths
 }
 
-; 从 DOpus 窗口标题提取路径
-; 参数:
-;   title - 窗口标题，如 "C:\Users\ZuoQi - Directory Opus"
-; 返回: 提取的路径字符串
-ExtractPathFromDOpusTitle(title) {
-    ; DOpus 标题格式通常是 "路径 - Directory Opus" 或仅 "路径"
-    path := RegExReplace(title, " - Directory Opus$")
-    path := RegExReplace(path, " - Opus$")
-    path := Trim(path)
+AddDOpusPathEntry(paths, hwnd) {
+    path := ExtractPathFromDOpusWindow(hwnd)
+    if (!(path && DirExist(path))) {
+        LogDebug("Skip DOpus window without valid path: hwnd=" hwnd)
+        return
+    }
+
+    paths.Push({
+        path: path,
+        source: "dopus",
+        label: "DOpus",
+        hwnd: hwnd,
+        timestamp: A_TickCount
+    })
+    LogInfo("Add DOpus path: " path)
+}
+
+ExtractPathFromDOpusWindow(hwnd) {
+    controlPath := ExtractPathFromDOpusControls(hwnd)
+    if (controlPath)
+        return controlPath
+
+    windowTextPath := ExtractPathFromDOpusWindowText(hwnd)
+    if (windowTextPath)
+        return windowTextPath
+
+    title := ""
+    try title := WinGetTitle("ahk_id " hwnd)
+
+    return ExtractPathFromDOpusTitle(title)
+}
+
+ExtractPathFromDOpusControls(hwnd) {
+    try {
+        controls := WinGetControls("ahk_id " hwnd)
+    } catch as err {
+        LogWarn("Failed to inspect DOpus controls: " err.Message)
+        return ""
+    }
+
+    candidates := []
+    for control in controls {
+        text := GetDOpusControlTextSafe(control, hwnd)
+        if (!text)
+            continue
+
+        foundPaths := ExtractExistingPathsFromText(text)
+        for path in foundPaths
+            candidates.Push(path)
+    }
+
+    return SelectBestDOpusPath(candidates)
+}
+
+ExtractPathFromDOpusWindowText(hwnd) {
+    oldSetting := A_DetectHiddenText
+    try {
+        DetectHiddenText(true)
+        allText := WinGetText("ahk_id " hwnd)
+    } catch as err {
+        LogWarn("Failed to read DOpus window text: " err.Message)
+        DetectHiddenText(oldSetting)
+        return ""
+    }
+    DetectHiddenText(oldSetting)
+
+    candidates := ExtractExistingPathsFromText(allText)
+    return SelectBestDOpusPath(candidates)
+}
+
+ExtractExistingPathsFromText(text) {
+    candidates := []
+    seen := Map()
+
+    for line in StrSplit(text, "`n", "`r") {
+        candidate := ExtractPathCandidate(line)
+        if (!(candidate && DirExist(candidate)))
+            continue
+
+        normalized := StrLower(candidate)
+        if (seen.Has(normalized))
+            continue
+
+        seen[normalized] := true
+        candidates.Push(candidate)
+    }
+
+    return candidates
+}
+
+ExtractPathCandidate(text) {
+    text := Trim(text, " `t`r`n")
+    if (!text)
+        return ""
+
+    text := RegExReplace(text, "\s+-\s+Directory Opus$")
+    text := RegExReplace(text, "\s+-\s+Opus$")
+    text := RegExReplace(text, "[>\r\n]+$")
+    text := Trim(text)
+
+    if (RegExMatch(text, "i)([A-Z]:\\[^<>:\x22|?*\r\n]+)", &match))
+        return NormalizeDOpusPathCandidate(match[1])
+
+    if (RegExMatch(text, "(\\\\[^\\\/:*?\x22<>|\r\n]+\\[^<>:\x22|?*\r\n]+)", &uncMatch))
+        return NormalizeDOpusPathCandidate(uncMatch[1])
+
+    return NormalizeDOpusPathCandidate(text)
+}
+
+NormalizeDOpusPathCandidate(path) {
+    path := Trim(path, " `t`r`n")
+    path := StrReplace(path, "/", "\")
+
+    if (StrLen(path) > 3 && SubStr(path, -1) = "\")
+        path := SubStr(path, 1, -1)
+
     return path
 }
 
-; Directory Opus 路径跳转
-; 参数:
-;   hwnd - DOpus 窗口句柄
-;   targetPath - 目标路径
-; 返回: 跳转成功返回 true，失败返回 false
-; 方法: DOpusRT 命令行（优先） → Ctrl+L 键盘模拟（降级）
+SelectBestDOpusPath(candidates) {
+    bestPath := ""
+    for path in candidates {
+        if (!(path && DirExist(path)))
+            continue
+
+        if (StrLen(path) > StrLen(bestPath))
+            bestPath := path
+    }
+
+    return bestPath
+}
+
+ExtractPathFromDOpusTitle(title) {
+    candidate := ExtractPathCandidate(title)
+    if (candidate && DirExist(candidate))
+        return candidate
+    return ""
+}
+
+GetDOpusControlTextSafe(control, hwnd) {
+    try {
+        return ControlGetText(control, "ahk_id " hwnd)
+    } catch {
+        return ""
+    }
+}
+
 NavigateDOpus(hwnd, targetPath) {
     try {
-        ; 尝试使用 DOpusRT 命令行（不需要剪贴板）
         dopusrtPath := FindDOpusRT()
         if (dopusrtPath) {
             Run('"' dopusrtPath '" /cmd Go "' targetPath '"', , "Hide")
-            LogDebug("DOpusRT 跳转成功: " targetPath)
+            LogDebug("DOpusRT navigation succeeded: " targetPath)
             return true
         }
     } catch as err {
-        LogWarn("DOpusRT 跳转失败，降级为键盘模拟: " err.Message)
+        LogWarn("DOpusRT navigation failed, falling back to keyboard: " err.Message)
     }
 
-    ; 降级：键盘模拟（需要保存剪贴板）
     savedClipboard := SaveClipboard()
 
     try {
         WinActivate("ahk_id " hwnd)
-        WinWaitActive("ahk_id " hwnd, , 1000)
+        if (!WinWaitActive("ahk_id " hwnd, , 1000)) {
+            RestoreClipboard(savedClipboard)
+            return false
+        }
 
-        ; Ctrl+L 聚焦路径栏（DOpus 默认快捷键）
         Send("^l")
         Sleep(50)
 
@@ -106,28 +213,26 @@ NavigateDOpus(hwnd, targetPath) {
         Sleep(50)
         Send("{Enter}")
 
-        LogDebug("DOpus 键盘模拟跳转: " targetPath)
-
-        ; 恢复剪贴板
+        LogDebug("DOpus keyboard navigation succeeded: " targetPath)
         RestoreClipboard(savedClipboard)
         return true
     } catch as err {
-        LogError("DOpus 跳转失败: " err.Message)
+        LogError("DOpus navigation failed: " err.Message)
         RestoreClipboard(savedClipboard)
         return false
     }
 }
 
-; 查找 DOpusRT.exe 路径
-; 返回: dopusrt.exe 完整路径，未找到返回空字符串
 FindDOpusRT() {
     static candidates := [
         "C:\Program Files\GPSoftware\Directory Opus\dopusrt.exe",
         "C:\Program Files (x86)\GPSoftware\Directory Opus\dopusrt.exe"
     ]
+
     for path in candidates {
         if (FileExist(path))
             return path
     }
+
     return ""
 }
