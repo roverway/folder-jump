@@ -9,10 +9,6 @@
 #Include "%A_ScriptDir%\adapters\totalcmd.ahk"
 #Include "%A_ScriptDir%\adapters\dopus.ahk"
 
-; Execute path switch
-; Params:
-;   entry - PathEntry object with target path and source metadata
-;   targetHwnd - target window handle, defaults to active window
 ExecutePathSwitch(entry, targetHwnd := 0) {
     if (!targetHwnd)
         targetHwnd := WinExist("A")
@@ -31,8 +27,6 @@ ExecutePathSwitch(entry, targetHwnd := 0) {
 
     LogInfo("Execute path switch: targetPath=" entry.path ", targetClass=" activeClass ", source=" entry.source)
 
-    ; Route by the current target window type only.
-    ; The source adapter provides the path, but must not hijack the target window.
     if (activeClass = "#32770") {
         SwitchFileDialog(targetHwnd, entry.path)
     }
@@ -40,8 +34,9 @@ ExecutePathSwitch(entry, targetHwnd := 0) {
         NavigateExplorer(targetHwnd, entry.path)
     }
     else if (activeClass = "TTOTAL_CMD") {
-        panel := entry.HasOwnProp("panel") ? entry.panel : "active"
-        NavigateTotalCmd(targetHwnd, entry.path, panel)
+        panelSide := entry.HasOwnProp("panelSide") ? entry.panelSide : (entry.HasOwnProp("panel") ? entry.panel : "")
+        panelRole := entry.HasOwnProp("panelRole") ? entry.panelRole : "active"
+        NavigateTotalCmd(targetHwnd, entry.path, panelSide, panelRole)
     }
     else if (activeClass = "dopus.lister" || activeClass = "dopus.tab") {
         NavigateDOpus(targetHwnd, entry.path)
@@ -52,52 +47,192 @@ ExecutePathSwitch(entry, targetHwnd := 0) {
     }
 }
 
-; File dialog path switch
 SwitchFileDialog(hwnd, targetPath) {
-    SwitchFileDialogFallback(hwnd, targetPath)
+    if (TryNavigateFileDialog(hwnd, targetPath))
+        return true
+
+    return SwitchFileDialogFallback(hwnd, targetPath)
 }
 
-; File dialog fallback: type into address bar
+TryNavigateFileDialog(hwnd, targetPath) {
+    if (!ActivateTargetWindow(hwnd))
+        return false
+
+    for shortcut in ["^l", "!d"] {
+        if (TryNavigateFileDialogWithShortcut(hwnd, targetPath, shortcut))
+            return true
+    }
+
+    return false
+}
+
+TryNavigateFileDialogWithShortcut(hwnd, targetPath, shortcut) {
+    savedClipboard := SaveClipboard()
+
+    try {
+        focusedControlBefore := GetFocusedControlSafe(hwnd)
+
+        Send(shortcut)
+        Sleep(200)
+
+        focusedControlAfter := GetFocusedControlSafe(hwnd)
+        LogDebug("File dialog shortcut attempted: " shortcut ", before=" focusedControlBefore ", after=" focusedControlAfter)
+
+        if (!SetFocusedControlText(hwnd, focusedControlAfter, targetPath)) {
+            A_Clipboard := targetPath
+            if (!ClipWait(1))
+                LogWarn("Clipboard write timed out while targeting file dialog")
+            Sleep(100)
+            Send("^a")
+            Sleep(50)
+            Send("^v")
+        }
+
+        Sleep(150)
+        Send("{Enter}")
+
+        if (WaitForFileDialogPath(hwnd, targetPath)) {
+            LogInfo("File dialog navigation succeeded via shortcut: " shortcut ", path=" targetPath)
+            RestoreClipboard(savedClipboard)
+            return true
+        }
+    } catch as err {
+        LogWarn("File dialog shortcut navigation failed: " shortcut ", error=" err.Message)
+    }
+
+    RestoreClipboard(savedClipboard)
+    return false
+}
+
 SwitchFileDialogFallback(hwnd, targetPath) {
-    LogDebug("Start dialog switch: hwnd=" hwnd ", path=" targetPath)
+    LogDebug("Start file dialog fallback: hwnd=" hwnd ", path=" targetPath)
 
     savedClipboard := SaveClipboard()
 
     try {
-        WinActivate("ahk_id " hwnd)
-        if (!WinWaitActive("ahk_id " hwnd, , 2000)) {
-            LogError("Failed to activate target window: ahk_id " hwnd)
+        if (!ActivateTargetWindow(hwnd)) {
             RestoreClipboard(savedClipboard)
             return false
         }
-        LogDebug("Target window activated")
 
-        Send("^l")
+        Send("!d")
         Sleep(200)
-
         Send("^a")
         Sleep(50)
 
         A_Clipboard := targetPath
-        if (!ClipWait(1)) {
-            LogWarn("Clipboard write timed out")
-        }
+        if (!ClipWait(1))
+            LogWarn("Clipboard write timed out during dialog fallback")
         Sleep(100)
 
         Send("^v")
-        Sleep(200)
+        Sleep(150)
         Send("{Enter}")
-        Sleep(200)
 
-        LogDebug("Dialog switch succeeded: " targetPath)
+        if (WaitForFileDialogPath(hwnd, targetPath)) {
+            LogInfo("File dialog fallback succeeded: " targetPath)
+            RestoreClipboard(savedClipboard)
+            return true
+        }
 
-        Sleep(300)
+        LogWarn("File dialog fallback could not verify navigation result")
         RestoreClipboard(savedClipboard)
-        return true
+        return false
     } catch as err {
         LogError("Dialog switch failed: " err.Message)
         TrayTip("FolderJump", "跳转失败: " err.Message, 3000)
         RestoreClipboard(savedClipboard)
         return false
     }
+}
+
+ActivateTargetWindow(hwnd) {
+    WinActivate("ahk_id " hwnd)
+    if (!WinWaitActive("ahk_id " hwnd, , 2000)) {
+        LogError("Failed to activate target window: ahk_id " hwnd)
+        return false
+    }
+
+    LogDebug("Target window activated")
+    return true
+}
+
+GetFocusedControlSafe(hwnd) {
+    try {
+        return ControlGetFocus("ahk_id " hwnd)
+    } catch {
+        return ""
+    }
+}
+
+SetFocusedControlText(hwnd, focusedControl, targetPath) {
+    if (!focusedControl)
+        return false
+
+    try {
+        ControlFocus(focusedControl, "ahk_id " hwnd)
+        ControlSetText(targetPath, focusedControl, "ahk_id " hwnd)
+        LogDebug("Set file dialog control text: " focusedControl)
+        return true
+    } catch as err {
+        LogWarn("Failed to set file dialog control text: " focusedControl ", error=" err.Message)
+        return false
+    }
+}
+
+WaitForFileDialogPath(hwnd, targetPath) {
+    normalizedTarget := NormalizeFileDialogPath(targetPath)
+
+    Loop 10 {
+        Sleep(150)
+
+        if (!WinExist("ahk_id " hwnd)) {
+            LogWarn("File dialog closed before navigation could be verified")
+            return false
+        }
+
+        if (FileDialogContainsPath(hwnd, normalizedTarget))
+            return true
+    }
+
+    return false
+}
+
+FileDialogContainsPath(hwnd, normalizedTarget) {
+    try {
+        controls := WinGetControls("ahk_id " hwnd)
+    } catch as err {
+        LogWarn("Failed to enumerate file dialog controls: " err.Message)
+        return false
+    }
+
+    for control in controls {
+        text := GetControlTextSafe(control, hwnd)
+        if (!text)
+            continue
+
+        normalizedText := NormalizeFileDialogPath(text)
+        if (InStr(normalizedText, normalizedTarget))
+            return true
+    }
+
+    return false
+}
+
+GetControlTextSafe(control, hwnd) {
+    try {
+        return ControlGetText(control, "ahk_id " hwnd)
+    } catch {
+        return ""
+    }
+}
+
+NormalizeFileDialogPath(pathText) {
+    pathText := StrReplace(pathText, "/", "\")
+    pathText := Trim(pathText, " `t`r`n")
+
+    if (StrLen(pathText) > 3 && SubStr(pathText, -1) = "\")
+        pathText := SubStr(pathText, 1, -1)
+
+    return StrLower(pathText)
 }

@@ -1,54 +1,118 @@
 ; ============================================================
-; Hotkey Manager — FolderJump
-; 热键注册、上下文检测、防抖
+; Hotkey Manager - FolderJump
+; Register hotkeys, detect supported contexts, debounce triggers
 ; ============================================================
 
 #Include "%A_ScriptDir%\lib\log_manager.ahk"
 
-; 上下文检测
-DetectContext(activeClass, activeTitle) {
-    ; Windows Explorer 文件夹窗口
+DetectContext(activeHwnd, activeClass, activeTitle) {
     if (activeClass = "CabinetWClass" || activeClass = "ExploreWClass")
         return "explorer"
 
-    ; 通用对话框（文件打开/保存）
     if (activeClass = "#32770") {
-        if (IsFileDialog(activeTitle))
+        if (IsFileDialog(activeHwnd, activeTitle))
             return "dialog"
         return "none"
     }
 
-    ; Total Commander
     if (activeClass = "TTOTAL_CMD")
         return "totalcmd"
 
-    ; Directory Opus
     if (activeClass = "dopus.lister" || activeClass = "dopus.tab")
         return "dopus"
 
-    ; XYplorer
     if (activeClass = "XYplorer")
         return "xyplorer"
 
-    ; 其他窗口 — 忽略
     return "none"
 }
 
-; 判断是否为文件对话框
-IsFileDialog(title) {
-    static keywords := ["打开", "保存", "另存为", "Open", "Save", "Save As", "浏览", "Browse", "选择文件夹", "Select Folder", "选择文件", "Select File"]
-    for kw in keywords {
-        if (InStr(title, kw))
-            return true
+IsFileDialog(hwnd, title := "") {
+    if (!hwnd)
+        return false
+
+    if (HasFileDialogControls(hwnd))
+        return true
+
+    return TitleLooksLikeFileDialog(title)
+}
+
+HasFileDialogControls(hwnd) {
+    try {
+        controls := WinGetControls("ahk_id " hwnd)
+    } catch as err {
+        LogWarn("Failed to inspect dialog controls: " err.Message)
+        return false
     }
+
+    if (controls.Length = 0)
+        return false
+
+    fileNameSignals := 0
+    actionSignals := 0
+    shellSignals := 0
+
+    for control in controls {
+        controlClass := GetDialogControlClassSafe(control, hwnd)
+        controlText := StrLower(GetDialogControlTextSafe(control, hwnd))
+
+        if (InStr(controlClass, "Edit"))
+            fileNameSignals += 1
+
+        if (InStr(controlClass, "ToolbarWindow32") || InStr(controlClass, "Breadcrumb Parent"))
+            shellSignals += 1
+
+        if (InStr(controlText, "open") || InStr(controlText, "save") || InStr(controlText, "browse") || InStr(controlText, "folder") || InStr(controlText, "file"))
+            actionSignals += 1
+    }
+
+    if (shellSignals > 0 && fileNameSignals > 0)
+        return true
+
+    if (fileNameSignals >= 2 && actionSignals > 0)
+        return true
+
     return false
 }
 
-; 热键触发入口
+TitleLooksLikeFileDialog(title) {
+    static keywords := [
+        "open",
+        "save",
+        "save as",
+        "browse",
+        "select folder",
+        "select file"
+    ]
+
+    loweredTitle := StrLower(title)
+    for keyword in keywords {
+        if (InStr(loweredTitle, keyword))
+            return true
+    }
+
+    return false
+}
+
+GetDialogControlClassSafe(control, hwnd) {
+    try {
+        return ControlGetClassNN(control, "ahk_id " hwnd)
+    } catch {
+        return control
+    }
+}
+
+GetDialogControlTextSafe(control, hwnd) {
+    try {
+        return ControlGetText(control, "ahk_id " hwnd)
+    } catch {
+        return ""
+    }
+}
+
 OnCtrlG(*) {
     global g_Config, g_PathCache, g_CurrentGui
 
-    ; 1. 获取前景窗口
     activeHwnd := WinExist("A")
     if (!activeHwnd)
         return
@@ -56,51 +120,43 @@ OnCtrlG(*) {
     activeClass := WinGetClass(activeHwnd)
     activeTitle := WinGetTitle(activeHwnd)
 
-    ; 2. 上下文判断
-    context := DetectContext(activeClass, activeTitle)
+    context := DetectContext(activeHwnd, activeClass, activeTitle)
     if (context = "none") {
-        LogDebug("非目标窗口，忽略热键触发. Class: " activeClass)
+        LogDebug("Ignore hotkey outside supported context. Class: " activeClass ", Title: " activeTitle)
         return
     }
 
-    ; 3. 防抖：配置时间内不重复触发
     static lastTrigger := 0
     debounceMs := g_Config.debounce_ms
     if (A_TickCount - lastTrigger < debounceMs)
         return
     lastTrigger := A_TickCount
 
-    ; 4. 如果已有 GUI 打开，先关闭
     if (IsSet(g_CurrentGui) && g_CurrentGui && g_CurrentGui.Hwnd) {
         try g_CurrentGui.Destroy()
         g_CurrentGui := ""
     }
 
-    ; 5. 立即刷新路径缓存
     RefreshPaths()
 
-    ; 6. 显示路径选择器
-    LogDebug("热键触发: context=" context ", 缓存路径数=" g_PathCache.Length)
+    LogDebug("Hotkey triggered: context=" context ", cachedPaths=" g_PathCache.Length)
     ShowPathSelector(context, activeHwnd)
 }
 
-; 动态热键重载
 ReloadHotkey() {
     global g_Config
 
-    ; 清除旧热键
     try {
         Hotkey(g_Config.hotkey, , "Off")
     }
 
-    ; 注册新热键
     try {
         Hotkey(g_Config.hotkey, OnCtrlG)
-        LogInfo("热键已注册: " g_Config.hotkey)
+        LogInfo("Hotkey registered: " g_Config.hotkey)
         return true
     } catch as err {
-        LogWarn("热键注册失败: " g_Config.hotkey " — " err.Message)
-        TrayTip("FolderJump", "热键冲突: " g_Config.hotkey, 3000)
+        LogWarn("Hotkey registration failed: " g_Config.hotkey ", error=" err.Message)
+        TrayTip("FolderJump", "Hotkey conflict: " g_Config.hotkey, 3000)
         return false
     }
 }
