@@ -1,4 +1,4 @@
-﻿# FolderJump 技术设计文档
+# FolderJump 技术设计文档
 
 > 轻量级 Windows 文件管理器路径快速切换工具 — 复刻 Listary Ctrl+G 功能
 
@@ -433,7 +433,6 @@ ReloadConfig() {
 ```
 
 ---
-
 ### 3.2 Window Monitor
 
 **职责**：定时检测所有打开的文件管理器窗口，收集路径列表。
@@ -600,137 +599,49 @@ IsTotalCmdWindow(class) {
 
 #### 3.4.2 路径获取
 
-**方法一**：读取地址栏控件文本
+**方法一**（优先）：使用 `SendMessage(1074, 17/18)`
+
+Total Commander 内部消息支持获取左右面板的活动和非活动面板句柄。通过发送特定消息获取到句柄后读取路径：
 
 ```autohotkey
-CollectTotalCmdPaths() {
-    paths := []
+GetTCPathsViaAPI(hwnd) {
+    ; 通过 SendMessage 1074获取左右面板的活动 (17) 和非活动 (18) 路径控件句柄
+    activePathHwnd := SendMessage(1074, 17, , , "ahk_id " hwnd)
+    inactivePathHwnd := SendMessage(1074, 18, , , "ahk_id " hwnd)
     
-    ; 查找所有 TC 窗口
-    DetectHiddenWindows(false)
-    tcHwnd := WinExist("ahk_class TTOTAL_CMD")
-    if (!tcHwnd)
-        return paths
-    
-    ; 获取左面板路径
-    ; TC 的地址栏控件类名为 TMyPanel 或 Edit
-    try {
-        leftPath := GetTCPanelPath(tcHwnd, "left")
-        if (leftPath) {
-            paths.Push({
-                path: leftPath,
-                source: "totalcmd",
-                label: "TC (左)",
-                hwnd: tcHwnd,
-                panel: "left",
-                timestamp: A_TickCount
-            })
-        }
-    }
-    
-    ; 获取右面板路径
-    try {
-        rightPath := GetTCPanelPath(tcHwnd, "right")
-        if (rightPath) {
-            paths.Push({
-                path: rightPath,
-                source: "totalcmd",
-                label: "TC (右)",
-                hwnd: tcHwnd,
-                panel: "right",
-                timestamp: A_TickCount
-            })
-        }
-    }
-    
-    return paths
+    ; 通过坐标分析判断左右，并使用 ControlGetText 读取路径文本
+    ...
 }
 ```
 
-**方法二**（推荐）：使用 `WM_COPYDATA` 消息
+**方法二**（兜底）：通过 `WinGetText` 枚举隐藏文本
 
-Total Commander 支持通过 `WM_COPYDATA` 获取当前路径：
+如果在某些旧版 TC 中控件消息失败，通过获取整个窗口的隐藏文本，寻找包含结尾 `>` 且以驱动器号开头的路径：
 
 ```autohotkey
-GetTCPanelPath(hwnd, panel) {
-    ; TC 内部命令：通过发送 CM_GETCURRENTDIRECTORY (2029) 获取当前目录
-    ; 需要 TC 开启 "Allow content plugins" 或使用 SendMessage
-    
-    ; 方法：使用 ControlGetText 读取路径面板
-    ; TC 的路径显示在 TMyPanel 类控件中
-    ; 左面板: 第一个 TMyPanel, 右面板: 第二个 TMyPanel
-    
-    controls := WinGetControls(hwnd)
-    ; ... 解析控件获取路径
-    
-    ; 更可靠的方法：使用 TC 的命令行接口
-    ; TC 支持通过命令行参数 /O /S /L=xxx /R=xxx 控制
-    ; 但读取路径需要使用 WM_COPYDATA
-    
-    ; 最简方案：读取 TC 配置文件 wcx_ftp.ini 或 wincmd.ini
-    ; 中的 [confirm] 节的 lastpath 值（不准确）
-    
-    ; 推荐方案：使用 AHK 的 ControlGetText
-    ; 需要确定 TMyPanel 的控件 ID
-    return ""
+GetTCPathsViaWinGetText(hwnd) {
+    ; 通过 WinGetText 获得窗口内部所有的文本（包括隐藏文本）
+    ; 寻找以 '>' 结尾并带有路径特征的行作为备用途径
+    ...
 }
 ```
 
-**方法三**（最可靠）：读取 TC 的 `wincmd.ini` 配置文件
-
-TC 在 `wincmd.ini` 的 `[left]` 和 `[right]` 节中记录当前路径：
-
-```autohotkey
-GetTCPathFromIni() {
-    ; 尝试多个可能的 ini 路径（32/64 位系统兼容）
-    possiblePaths := [
-        A_AppData "\GHISLER\wincmd.ini",                   ; 用户级 (x64)
-        A_AppData "\GHISLER\wincmd.ini",                   ; 用户级 (x86)
-        A_ProgramFiles "\Totalcmd\wincmd.ini",            ; 全局 (x64)
-        A_ProgramFiles "(x86)\Totalcmd\wincmd.ini",       ; 全局 (x86)
-    ]
-    
-    iniPath := ""
-    for path in possiblePaths {
-        if (FileExist(path)) {
-            iniPath := path
-            break
-        }
-    }
-    
-    if (!iniPath)
-        return ["", ""]
-    
-    leftPath := IniRead(iniPath, "left", "path", "")
-    rightPath := IniRead(iniPath, "right", "path", "")
-    
-    LogDebug("TC 路径从 ini 读取: 左=" leftPath ", 右=" rightPath)
-    
-    return [leftPath, rightPath]
-}
-```
-
-> **注意**：ini 文件方式有延迟（TC 写入频率不确定），但作为 500ms 轮询足够。
+> **注意**：TC 面板因为不确定是由哪一侧处于活动状态，需要动态从控件位置推理，并附带了 `panelSide` 和 `panelRole` 信息供后续跳转使用。
 
 #### 3.4.3 路径跳转
 
 ```autohotkey
-NavigateTotalCmd(hwnd, targetPath, panel) {
-    ; 方法一：WM_COPYDATA 发送路径
-    ; TC 支持通过 WM_COPYDATA 接收命令
+NavigateTotalCmd(hwnd, targetPath, panelSide := "", panelRole := "active") {
+    ; 方法一（优先）：通过命令行接口 (基于 EXE) 继续跳转
+    ; 通过 WinGetPID 找到 TC 进程并向其传参 `/O /T /L="目标路径"` (或 /R=)
+    if (NavigateTotalCmdByCommandLine(hwnd, targetPath, panelSide))
+        return true
     
-    ; 方法二：模拟键盘输入到路径栏
+    ; 方法二（降级）：模拟键盘输入
     WinActivate("ahk_id " hwnd)
-    WinWaitActive("ahk_id " hwnd, , 1000)
-    
-    ; Ctrl+D 打开路径输入框（TC 默认快捷键）
-    Send("^d")
-    Sleep(50)
-    
-    A_Clipboard := targetPath
-    Send("^v")
-    Sleep(50)
-    Send("{Enter}")
+    ; 必要时按 `Tab` 切换到非活动面板
+    ; Ctrl+D 打开路径输入框，输入路径并确认
+    ...
 }
 ```
 
@@ -750,74 +661,48 @@ IsDOpusWindow(class) {
 
 #### 3.5.2 路径获取
 
-**方法**：使用 DOpus 的 COM 接口（`DOpusRT` 或脚本）
+**方法一**（主用）：使用 `dopusrt.exe /info` 获取 XML 格式全量路径
 
 ```autohotkey
-CollectDOpusPaths() {
-    paths := []
+CollectDOpusPathsViaDOpusRT() {
+    ; 使用 DOpusRT 输出 XML 临时文件
+    RunWait('"' dopusrtPath '" /info "' tempFile '",paths', , "Hide")
     
-    ; 方法一：通过 DOpus 脚本接口
-    ; DOpus 支持通过 DOpus.Command 执行脚本命令
-    try {
-        dopus := ComObject("DOpus.Command")
-        ; 获取所有打开的标签页路径
-        ; 这需要 DOpus 的脚本支持
-        
-        ; 方法二：通过 DOpusRT.exe 命令行
-        ; RunWait 'dopusrt.exe /cmd Go CURRENT' 获取当前路径
-    }
-    
-    ; 方法三：窗口枚举 + 标题解析（降级方案）
-    for hwnd in WinGetList("ahk_class dopus.lister") {
-        try {
-            title := WinGetTitle(hwnd)
-            ; DOpus 窗口标题通常包含当前路径
-            path := ExtractPathFromDOpusTitle(title)
-            if (path && DirExist(path)) {
-                paths.Push({
-                    path: path,
-                    source: "dopus",
-                    label: "DOpus",
-                    hwnd: hwnd,
-                    timestamp: A_TickCount
-                })
-            }
-        }
-    }
-    
-    return paths
-}
-
-ExtractPathFromDOpusTitle(title) {
-    ; DOpus 标题格式通常是 "路径 - Directory Opus" 或仅 "路径"
-    ; 移除 " - Directory Opus" 后缀
-    path := RegExReplace(title, " - Directory Opus$")
-    path := RegExReplace(path, " - Opus$")
-    return path
+    ; 使用 Msxml2.DOMDocument.6.0 解析 XML
+    ; 检索 active_tab = "1" 和 side = "1" 或 "2"
+    ; 获取每个可见页签的详细并构建 Label（区分左/右、可见/隐藏）
+    ...
 }
 ```
 
-> **建议**：DOpus 的 COM 接口最可靠但需要 DOpus 运行中。窗口标题解析作为降级方案。
+**方法二**（兜底）：窗口标题正则提取（降级方案）
+
+如果 DOpusRT 执行失败，降级扫描 `ahk_class dopus.lister` 及 `dopus.tab` 的窗口。
+
+```autohotkey
+AddDOpusTitlePathEntry(paths, hwnd) {
+    ; 获取 DOpus 窗口标题
+    title := WinGetTitle("ahk_id " hwnd)
+    
+    ; 使用 DOpus 独特规则从 title 中清理 " - Directory Opus" 等提取真实路径
+    path := ExtractPathFromDOpusTitle(title)
+    ...
+}
+```
+
+> **建议**：`DOpusRT` 命令是优先的且极其可靠，只要 DOpus 位于标准安装目录中便可执行。
 
 #### 3.5.3 路径跳转
 
 ```autohotkey
 NavigateDOpus(hwnd, targetPath) {
-    ; 方法一：通过 DOpusRT 命令行
-    ; Run('dopusrt.exe /cmd Go "' targetPath '"')
+    ; 方法一（主用）：通过 DOpusRT 命令行 `Go` 命令
+    Run('"' dopusrtPath '" /cmd Go "' targetPath '"', , "Hide")
+    return true
     
-    ; 方法二：模拟键盘
-    WinActivate("ahk_id " hwnd)
-    WinWaitActive("ahk_id " hwnd, , 1000)
-    
-    ; Ctrl+L 聚焦路径栏（DOpus 默认快捷键）
-    Send("^l")
-    Sleep(50)
-    
-    A_Clipboard := targetPath
-    Send("^v")
-    Sleep(50)
-    Send("{Enter}")
+    ; 方法二（降级）：如果 DopusRT 不存在或失败，使用键盘模拟
+    ; 聚焦后 Ctrl+L 获取焦点，Ctrl+V 并回车
+    ...
 }
 ```
 
@@ -961,36 +846,66 @@ ExecutePathSwitch(entry, targetHwnd := 0) {
         return
 
     activeClass := WinGetClass(targetHwnd)
-    if (activeClass != "#32770")
-        return
 
-    SwitchFileDialog(targetHwnd, entry.path)
+    ; 针对不同类型窗口调用对应的 Adapter 跳转函数
+    if (activeClass = "#32770") {
+        SwitchFileDialog(targetHwnd, entry.path)
+    }
+    else if (activeClass = "CabinetWClass" || activeClass = "ExploreWClass") {
+        NavigateExplorer(targetHwnd, entry.path)
+    }
+    else if (activeClass = "TTOTAL_CMD") {
+        ; 提取面板及角色（如 left/right，active/inactive）
+        NavigateTotalCmd(targetHwnd, entry.path, panelSide, panelRole)
+    }
+    else if (activeClass = "dopus.lister" || activeClass = "dopus.tab") {
+        NavigateDOpus(targetHwnd, entry.path)
+    }
+    else {
+        SwitchFileDialogFallback(targetHwnd, entry.path)
+    }
 }
 ```
 
 #### 文件对话框跳转
 
-**方法一**（优先）：控件级方案
+主要面向另存为、打开等 `#32770` 窗口，支持四层备选方案。
 
+**方法一**（首选）：基于 `Edit1` 控件的超快无感替换
 ```autohotkey
-SwitchFileDialog(hwnd, targetPath) {
-    ; 1. 优先定位地址栏或其可编辑子控件
-    ; 2. 直接写入路径并确认
-    ; 3. 失败后再走快捷键和通用按键兜底
+TryNavigateFileDialogFast(hwnd, targetPath) {
+    ; 这是最接近 Listary 体验的方式。
+    ; 1. 给目标路径加上反斜杠，避免跳到对应文件。
+    ; 2. 获取 Edit1 输入框并保存用户之前输入的文件名（如果是另存为操作）。
+    ; 3. 直接通过 ControlSetText 将目标路径填入 Edit1 并发送 Enter 触发对话框内部跳转。
+    ; 4. 毫秒级恢复之前保存的 Edit1 文件名，全程对用户肉眼无感。
+    ...
 }
 ```
 
-**方法二**（次优）：快捷键切入地址栏
+**方法二**（次优）：基于智能分析直接向地址类型控件投递
+```autohotkey
+TryNavigateFileDialogByControl(hwnd, targetPath) {
+    ; 遍历寻找类似地址栏的控件 （"breadcrumb" 或 "toolbarwindow32"）
+    ; 或备用普通的编辑控件，填入并投递。
+    ...
+}
+```
 
+**方法三**（方案三）：借助快捷键切入地址栏
 ```autohotkey
 TryNavigateFileDialogByShortcut(hwnd, targetPath) {
-    ; 1. 先尝试 Ctrl+L
-    ; 2. 失败后尝试 Alt+D
-    ; 3. 成功聚焦后写入路径并确认
+    ; 依次模拟对话框热键（Ctrl+L, Alt+D），聚焦到对话框的原生地址栏。
+    ; 获取焦点后投递并确认。
+    ...
 }
+```
 
+**方法四**（最后兜底）：通用按键模拟
+```autohotkey
 SwitchFileDialogFallback(hwnd, targetPath) {
-    ; 最后兜底才使用通用按键模拟
+    ; Alt+D -> Ctrl+A -> Ctrl+V 黏贴路径 -> Enter，成功率极高但有可见交互。
+    ...
 }
 ```
 
