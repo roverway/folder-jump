@@ -546,42 +546,7 @@ IsVirtualFolder(path) {
 - **窗口标题降级**：COM 失败时，从 `window.LocationName` 提取路径（地址栏文本）
 - **多标签窗口**：Windows 11 Explorer 支持多标签，每个标签对应一个独立的 `window` 对象，COM 枚举天然支持
 
-#### 3.3.2 路径跳转
 
-**方法一**（优先）：COM 导航
-```autohotkey
-NavigateExplorer(hwnd, targetPath) {
-    shell := ComObject("Shell.Application")
-    for window in shell.Windows {
-        try {
-            if (window.hwnd = hwnd) {
-                window.Navigate(targetPath)
-                return true
-            }
-        }
-    }
-    return false
-}
-```
-
-**方法二**（降级）：模拟地址栏输入
-```autohotkey
-NavigateExplorerFallback(hwnd, targetPath) {
-    ; 激活目标窗口
-    WinActivate("ahk_id " hwnd)
-    WinWaitActive("ahk_id " hwnd, , 1000)
-    
-    ; Alt+D 聚焦地址栏
-    Send("!d")
-    Sleep(50)
-    
-    ; 粘贴路径
-    A_Clipboard := targetPath
-    Send("^v")
-    Sleep(50)
-    Send("{Enter}")
-}
-```
 
 ---
 
@@ -628,22 +593,7 @@ GetTCPathsViaWinGetText(hwnd) {
 
 > **注意**：TC 面板因为不确定是由哪一侧处于活动状态，需要动态从控件位置推理，并附带了 `panelSide` 和 `panelRole` 信息供后续跳转使用。
 
-#### 3.4.3 路径跳转
 
-```autohotkey
-NavigateTotalCmd(hwnd, targetPath, panelSide := "", panelRole := "active") {
-    ; 方法一（优先）：通过命令行接口 (基于 EXE) 继续跳转
-    ; 通过 WinGetPID 找到 TC 进程并向其传参 `/O /T /L="目标路径"` (或 /R=)
-    if (NavigateTotalCmdByCommandLine(hwnd, targetPath, panelSide))
-        return true
-    
-    ; 方法二（降级）：模拟键盘输入
-    WinActivate("ahk_id " hwnd)
-    ; 必要时按 `Tab` 切换到非活动面板
-    ; Ctrl+D 打开路径输入框，输入路径并确认
-    ...
-}
-```
 
 ---
 
@@ -692,19 +642,7 @@ AddDOpusTitlePathEntry(paths, hwnd) {
 
 > **建议**：`DOpusRT` 命令是优先的且极其可靠，只要 DOpus 位于标准安装目录中便可执行。
 
-#### 3.5.3 路径跳转
 
-```autohotkey
-NavigateDOpus(hwnd, targetPath) {
-    ; 方法一（主用）：通过 DOpusRT 命令行 `Go` 命令
-    Run('"' dopusrtPath '" /cmd Go "' targetPath '"', , "Hide")
-    return true
-    
-    ; 方法二（降级）：如果 DopusRT 不存在或失败，使用键盘模拟
-    ; 聚焦后 Ctrl+L 获取焦点，Ctrl+V 并回车
-    ...
-}
-```
 
 ---
 
@@ -847,19 +785,9 @@ ExecutePathSwitch(entry, targetHwnd := 0) {
 
     activeClass := WinGetClass(targetHwnd)
 
-    ; 针对不同类型窗口调用对应的 Adapter 跳转函数
+    ; 针对对话框调用对应的跳转函数
     if (activeClass = "#32770") {
         SwitchFileDialog(targetHwnd, entry.path)
-    }
-    else if (activeClass = "CabinetWClass" || activeClass = "ExploreWClass") {
-        NavigateExplorer(targetHwnd, entry.path)
-    }
-    else if (activeClass = "TTOTAL_CMD") {
-        ; 提取面板及角色（如 left/right，active/inactive）
-        NavigateTotalCmd(targetHwnd, entry.path, panelSide, panelRole)
-    }
-    else if (activeClass = "dopus.lister" || activeClass = "dopus.tab") {
-        NavigateDOpus(targetHwnd, entry.path)
     }
     else {
         SwitchFileDialogFallback(targetHwnd, entry.path)

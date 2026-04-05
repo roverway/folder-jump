@@ -1,4 +1,4 @@
-﻿; ============================================================
+; ============================================================
 ; Directory Opus 适配器 - FolderJump
 ; 负责获取与跳转 Directory Opus 路径
 ; ============================================================
@@ -224,45 +224,6 @@ NormalizeDOpusPathCandidate(path) {
     return path
 }
 
-NavigateDOpus(hwnd, targetPath) {
-    try {
-        dopusrtPath := FindDOpusRT()
-        if (dopusrtPath) {
-            Run('"' dopusrtPath '" /cmd Go "' targetPath '"', , "Hide")
-            LogDebug("DOpusRT navigation succeeded: " targetPath)
-            return true
-        }
-    } catch as err {
-        LogWarn("DOpusRT navigation failed, falling back to keyboard: " err.Message)
-    }
-
-    savedClipboard := SaveClipboard()
-
-    try {
-        WinActivate("ahk_id " hwnd)
-        if (!WinWaitActive("ahk_id " hwnd, , 1000)) {
-            RestoreClipboard(savedClipboard)
-            return false
-        }
-
-        Send("^l")
-        Sleep(50)
-
-        A_Clipboard := targetPath
-        Sleep(50)
-        Send("^v")
-        Sleep(50)
-        Send("{Enter}")
-
-        LogDebug("DOpus keyboard navigation succeeded: " targetPath)
-        RestoreClipboard(savedClipboard)
-        return true
-    } catch as err {
-        LogError("DOpus navigation failed: " err.Message)
-        RestoreClipboard(savedClipboard)
-        return false
-    }
-}
 
 FindDOpusRT() {
     static candidates := [

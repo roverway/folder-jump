@@ -1,4 +1,4 @@
-﻿; ============================================================
+; ============================================================
 ; Explorer Adapter — FolderJump
 ; Windows Explorer 路径获取与跳转适配器
 ; ============================================================
@@ -64,63 +64,4 @@ IsVirtualFolder(path) {
     return false
 }
 
-; 导航到目标路径（COM 方法，优先）
-NavigateExplorer(hwnd, targetPath) {
-    try {
-        shell := ComObject("Shell.Application")
-    } catch as err {
-        LogError("Shell.Application COM 获取失败，降级为键盘模拟: " err.Message)
-        NavigateExplorerFallback(hwnd, targetPath)
-        return
-    }
 
-    for window in shell.Windows {
-        try {
-            if (window.hwnd = hwnd) {
-                window.Navigate(targetPath)
-                LogDebug("Explorer COM 导航成功: " targetPath)
-                return true
-            }
-        }
-    }
-
-    ; 未找到对应窗口，降级
-    LogWarn("未找到匹配的 Explorer 窗口，降级为键盘模拟")
-    NavigateExplorerFallback(hwnd, targetPath)
-}
-
-; 导航降级方案：模拟地址栏输入
-NavigateExplorerFallback(hwnd, targetPath) {
-    ; 保存当前剪贴板内容
-    savedClipboard := SaveClipboard()
-    
-    try {
-        WinActivate("ahk_id " hwnd)
-        if (!WinWaitActive("ahk_id " hwnd, , 1000)) {
-            LogError("无法激活 Explorer 窗口: ahk_id " hwnd)
-            RestoreClipboard(savedClipboard)
-            return false
-        }
-
-        ; Alt+D 聚焦地址栏
-        Send("!d")
-        Sleep(50)
-
-        ; 粘贴路径
-        A_Clipboard := targetPath
-        Sleep(50)
-        Send("^v")
-        Sleep(50)
-        Send("{Enter}")
-
-        LogDebug("Explorer 键盘模拟导航: " targetPath)
-        
-        ; 恢复剪贴板
-        RestoreClipboard(savedClipboard)
-        return true
-    } catch as err {
-        LogError("Explorer 导航失败: " err.Message)
-        RestoreClipboard(savedClipboard)
-        return false
-    }
-}

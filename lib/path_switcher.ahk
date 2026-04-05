@@ -30,19 +30,8 @@ ExecutePathSwitch(entry, targetHwnd := 0) {
     if (activeClass = "#32770") {
         SwitchFileDialog(targetHwnd, entry.path)
     }
-    else if (activeClass = "CabinetWClass" || activeClass = "ExploreWClass") {
-        NavigateExplorer(targetHwnd, entry.path)
-    }
-    else if (activeClass = "TTOTAL_CMD") {
-        panelSide := entry.HasOwnProp("panelSide") ? entry.panelSide : (entry.HasOwnProp("panel") ? entry.panel : "")
-        panelRole := entry.HasOwnProp("panelRole") ? entry.panelRole : "active"
-        NavigateTotalCmd(targetHwnd, entry.path, panelSide, panelRole)
-    }
-    else if (activeClass = "dopus.lister" || activeClass = "dopus.tab") {
-        NavigateDOpus(targetHwnd, entry.path)
-    }
     else {
-        LogWarn("Unknown window type, using fallback: " activeClass)
+        LogWarn("Unknown or unsupported window type, using fallback: " activeClass)
         SwitchFileDialogFallback(targetHwnd, entry.path)
     }
 }
