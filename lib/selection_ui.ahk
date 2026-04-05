@@ -22,6 +22,31 @@ g_Themes := {
     }
 }
 
+; 智能截断长路径
+; 参数:
+;   fullPath - 完整路径
+;   maxLength - 显示的最大字符数（默认 60）
+; 返回:
+;   截断后的路径（保留末尾文件夹和开头部分）
+TruncatePathForDisplay(fullPath, maxLength := 60) {
+    if (StrLen(fullPath) <= maxLength)
+        return fullPath
+    
+    ; 获取末尾文件夹名称
+    lastBackslash := InStr(fullPath, "\", , 0)
+    folderName := SubStr(fullPath, lastBackslash + 1)
+    
+    ; 如果末尾文件夹本身已经接近最大长度，直接返回
+    if (StrLen(folderName) >= maxLength - 5)
+        return "..." folderName
+    
+    ; 计算剩余空间用于显示开头路径
+    remainingLength := maxLength - StrLen(folderName) - 4  ; 4 是"..."的长度
+    prefixPath := SubStr(fullPath, 1, remainingLength)
+    
+    return prefixPath "..." folderName
+}
+
 ; 显示路径选择器
 ; 参数:
 ;   context - 当前窗口类型（"explorer", "dialog", "totalcmd", "dopus"）
@@ -62,16 +87,20 @@ ShowPathSelector(context, activeHwnd) {
     titleColor := theme.text
     pathGui.Add("Text", "x5 y5 w390 Center c" titleColor, "FolderJump - 选择目标文件夹")
 
-    ; 构建列表项
+    ; 构建列表项（使用截断路径）
+    ; 保存原始路径数据供后续使用
     items := []
+    displayPaths := []
     maxItems := g_Config.max_items
     count := Min(g_PathCache.Length, maxItems)
     Loop count {
         entry := g_PathCache[A_Index]
+        ; 截断路径用于显示（最多60字符）
+        displayPath := TruncatePathForDisplay(entry.path, 60)
         if (g_Config.show_source_label)
-            items.Push(entry.path "  [" entry.label "]")
-        else
-            items.Push(entry.path)
+            displayPath := displayPath "  [" entry.label "]"
+        items.Push(displayPath)
+        displayPaths.Push(entry.path)  ; 保存完整路径
     }
 
     ; 获取 DPI 缩放因子
@@ -82,23 +111,30 @@ ShowPathSelector(context, activeHwnd) {
     ; 计算每项高度（基于 DPI）
     itemHeight := Round(25 * dpiScale)
     maxListHeight := Round(300 * dpiScale)
-    headerHeight := Round(80 * dpiScale)  ; 标题 + 底部提示高度
+    previewHeight := Round(50 * dpiScale)  ; 底部预览区域高度
+    headerHeight := Round(80 * dpiScale)  ; 标题 + 提示高度
 
     ; 路径列表（ListBox）
     listHeight := Min(count * itemHeight, maxListHeight)
     listBox := pathGui.Add("ListBox", "x5 y30 w390 h" listHeight " vPathList", items)
     listBox.Choose(1)
 
+    ; 完整路径预览区域
+    textColor := theme.text
+    previewBox := pathGui.Add("Text", "x5 y+" 5 " w390 h30 c" textColor, displayPaths[1])
+    previewBox.Value := displayPaths[1]
+
     ; 底部提示
     hintColor := theme.hint
-    pathGui.Add("Text", "x5 y+" 5 " w390 Center c" hintColor, "↑↓ 选择  |  Enter 确认  |  Esc 取消")
+    pathGui.Add("Text", "x5 y+" 3 " w390 Center c" hintColor, "↑↓ 选择  |  Enter 确认  |  Esc 取消")
 
     ; 计算弹出位置
     popupX := wx
     popupY := wy + wh + 5
 
     ; 确保不超出屏幕底部
-    totalHeight := listHeight + headerHeight
+    ; totalHeight 需要包含：标题 + listBox + 预览区 + 提示 + 间距
+    totalHeight := listHeight + headerHeight + 30 + 6
     if (popupY + totalHeight > A_ScreenHeight) {
         popupY := wy - totalHeight - 10
         if (popupY < 0)
@@ -109,8 +145,11 @@ ShowPathSelector(context, activeHwnd) {
     pathGui.Show("x" popupX " y" popupY)
 
     ; 保存 GUI 引用和原始活动窗口句柄（用于后续跳转）
+    ; 同时保存完整路径列表用于预览
     g_CurrentGui := pathGui
     pathGui.targetHwnd := activeHwnd
+    pathGui.displayPaths := displayPaths
+    pathGui.previewBox := previewBox
 
     ; 绑定键盘事件
     pathGui.OnEvent("Escape", GuiEscape)
@@ -156,11 +195,23 @@ ListBoxConfirm(GuiCtrlObj, *) {
 }
 
 ; ListBox 变更事件（用于键盘导航时记录当前选择）
-; 保存当前选择到 GUI 对象以便 Enter 键处理
+; 保存当前选择到 GUI 对象以便 Enter 键处理，同时更新底部预览
 ListBoxChange(GuiCtrlObj, *) {
     global g_CurrentGui
-    if (IsSet(g_CurrentGui) && g_CurrentGui)
-        g_CurrentGui.selectedIndex := GuiCtrlObj.Value
+    if (IsSet(g_CurrentGui) && g_CurrentGui) {
+        selectedIndex := GuiCtrlObj.Value
+        g_CurrentGui.selectedIndex := selectedIndex
+        
+        ; 更新底部完整路径预览
+        if (selectedIndex > 0 && 
+            g_CurrentGui.HasOwnProp("displayPaths") && 
+            selectedIndex <= g_CurrentGui.displayPaths.Length &&
+            g_CurrentGui.HasOwnProp("previewBox")) {
+            ; 显示完整路径
+            fullPath := g_CurrentGui.displayPaths[selectedIndex]
+            g_CurrentGui.previewBox.Value := fullPath
+        }
+    }
 }
 
 ; Enter 键确认（通过 InputHook 捕获）
