@@ -1,4 +1,4 @@
-﻿; ============================================================
+; ============================================================
 ; 路径跳转模块 - FolderJump
 ; 负责根据当前窗口类型执行路径跳转
 ; ============================================================
@@ -48,13 +48,66 @@ ExecutePathSwitch(entry, targetHwnd := 0) {
 }
 
 SwitchFileDialog(hwnd, targetPath) {
+    ; 1. 首选方案：基于 Edit1 控件的快速无感跳转（最接近 Listary 体验的方式）
+    if (TryNavigateFileDialogFast(hwnd, targetPath))
+        return true
+
+    ; 2. 次选方案：通过寻找其他控件尝试跳转 (旧有逻辑)
     if (TryNavigateFileDialogByControl(hwnd, targetPath))
         return true
 
+    ; 3. 三选方案：通过快捷键 (Alt+D / Ctrl+L)
     if (TryNavigateFileDialogByShortcut(hwnd, targetPath))
         return true
 
+    ; 4. 最终后备方案：全局按键模拟
     return SwitchFileDialogFallback(hwnd, targetPath)
+}
+
+TryNavigateFileDialogFast(hwnd, targetPath) {
+    LogDebug("Try fast Edit1 navigation")
+    
+    ; 必须以反斜杠结尾，否则对话框可能会尝试选中同名文件而不是跳转目录
+    navPath := targetPath
+    if (SubStr(navPath, -1) != "\")
+        navPath .= "\"
+        
+    try {
+        editControl := "Edit1"
+        
+        ; 检查 Edit1 是否真正存在
+        try {
+            ControlGetStyle(editControl, "ahk_id " hwnd)
+        } catch {
+            LogWarn("Edit1 control not found for fast navigation")
+            return false
+        }
+        
+        ; 1. 备份原文件名（因为用户可能已经在另存为对话框输入了要保存的文件名）
+        originalText := ControlGetText(editControl, "ahk_id " hwnd)
+        
+        ; 2. 聚焦文件名输入框，并修改为目标跳转路径
+        ControlFocus(editControl, "ahk_id " hwnd)
+        ControlSetText(navPath, editControl, "ahk_id " hwnd)
+        
+        ; 短暂睡眠等待 Windows 内部应用控件的变更事件
+        Sleep(20)
+        
+        ; 3. 发送回车执行路径跳转
+        ControlSend("{Enter}", editControl, "ahk_id " hwnd)
+        
+        ; 短暂睡眠等待对话框开始跳转反应 (约 30ms 后恢复，肉眼基本不可察觉)
+        Sleep(30)
+        
+        ; 4. 瞬间恢复用户原本输入的文件名
+        ControlSetText(originalText, editControl, "ahk_id " hwnd)
+        
+        LogInfo("Fast Edit1 navigation executed successfully: " targetPath)
+        return true
+    } catch as err {
+        LogWarn("Fast Edit1 navigation failed: " err.Message)
+        return false
+    }
 }
 
 TryNavigateFileDialogByControl(hwnd, targetPath) {
