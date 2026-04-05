@@ -4,9 +4,9 @@
 
 | 项目 | 信息 |
 |------|------|
-| 版本 | 0.1.0-draft |
-| 日期 | 2026-04-03 |
-| 状态 | 设计阶段 |
+| 版本 | 0.1.0 |
+| 日期 | 2026-04-05 |
+| 状态 | 已实现，待继续打磨 |
 | 技术栈 | AutoHotkey v2 |
 | 目标平台 | Windows 10/11 (x64) |
 
@@ -16,9 +16,9 @@
 
 ### 1.1 目的与范围
 
-FolderJump 是一个轻量级 Windows 后台工具，用于在文件对话框（打开/保存）或文件管理器中快速跳转到其他已打开的文件夹路径。用户按下 `Ctrl+G` 后，弹出浮动菜单列出所有已打开文件夹，选择即可跳转。
+FolderJump 是一个轻量级 Windows 后台工具，用于在文件对话框（打开/保存、另存为）中快速跳转到其他已打开的文件夹路径。用户按下 `Ctrl+G` 后，弹出浮动菜单列出当前已收集到的文件夹路径，选择即可让当前文件对话框跳转到目标目录。
 
-**范围**：仅实现 Ctrl+G 路径切换功能，不包含 Listary 的搜索、收藏、模糊匹配等其他功能。
+**当前范围**：当前版本只在文件对话框中响应 `Ctrl+G`。路径来源可以来自 Explorer、Total Commander、Directory Opus，但热键不会在这些文件管理器主窗口中直接触发。
 
 ### 1.2 目标用户
 
@@ -30,12 +30,12 @@ FolderJump 是一个轻量级 Windows 后台工具，用于在文件对话框（
 
 | # | 功能 | 优先级 |
 |---|------|--------|
-| F1 | 全局热键 `Ctrl+G` 触发路径选择菜单 | P0 |
+| F1 | 在文件对话框中通过 `Ctrl+G` 触发路径选择菜单 | P0 |
 | F2 | 自动检测并列出所有 Windows Explorer 已打开文件夹 | P0 |
 | F3 | 在文件对话框中跳转到选中路径 | P0 |
 | F4 | 键盘导航（↑↓选择、Enter确认、Esc取消） | P0 |
-| F5 | Total Commander 路径获取与跳转 | P1 |
-| F6 | Directory Opus 路径获取与跳转 | P1 |
+| F5 | Total Commander 路径获取 | P1 |
+| F6 | Directory Opus 路径获取 | P1 |
 | F7 | 用户自定义热键 | P2 |
 | F8 | 配置界面 / 配置文件 | P2 |
 | F9 | 主题切换（深色/浅色） | P3 |
@@ -104,7 +104,7 @@ FolderJump 是一个轻量级 Windows 后台工具，用于在文件对话框（
 ### 2.2 数据流
 
 ```
-用户按下 Ctrl+G
+用户在文件对话框中按下 Ctrl+G
     │
     ▼
 Hotkey Manager 捕获热键
@@ -112,8 +112,7 @@ Hotkey Manager 捕获热键
     ▼
 Context Detector 判断前景窗口类型
     │
-    ├── 文件对话框 → 标记为 "dialog" 模式
-    ├── 文件管理器 → 标记为 "manager" 模式
+    ├── 文件对话框 → 允许继续执行
     └── 其他窗口 → 忽略（不响应）
     │
     ▼
@@ -128,8 +127,7 @@ Selection UI 弹出，显示路径列表
     ▼
 用户选择路径 → Path Switcher 执行跳转
     │
-    ├── dialog 模式 → 设置对话框当前目录
-    └── manager 模式 → 导航到目标路径
+    └── 对当前文件对话框应用目标路径
 ```
 
 ### 2.3 组件职责总览
@@ -137,14 +135,14 @@ Selection UI 弹出，显示路径列表
 | 组件 | 职责 | 依赖 |
 |------|------|------|
 | Hotkey Manager | 注册全局热键，触发动作，动态热键重载 | Windows RegisterHotKey API |
-| Context Detector | 识别前景窗口类型 | WinGetClass, WinGetTitle |
+| Context Detector | 识别前景窗口是否为受支持文件对话框 | WinGetClass, WinGetTitle, 控件结构 |
 | Window Monitor | 定时轮询窗口状态 | SetTimer, Shell.Application COM |
 | Tray Manager | 系统托盘图标与右键菜单 | AHK TrayTip / TrayCreate |
 | Log Manager | 日志记录与轮转 | 文件 I/O |
 | Path Collector | 从各文件管理器提取路径 | 各 Adapter |
 | Explorer Adapter | Windows Explorer 路径获取/跳转 | Shell.Application COM |
 | TotalCmd Adapter | Total Commander 路径获取/跳转 | WM_COPYDATA / ControlSetText |
-| DOpus Adapter | Directory Opus 路径获取/跳转 | DOpus COM / 脚本接口 |
+| DOpus Adapter | Directory Opus 路径获取 | DOpusRT / 标题解析 |
 | Selection UI | 浮动菜单展示与交互 | AHK Gui |
 | Path Switcher | 执行路径跳转 | 各 Adapter 的导航方法 |
 | Tray Manager | 系统托盘图标与右键菜单 | AHK TraySetIcon / A_TrayMenu |
@@ -331,10 +329,10 @@ folder-jump/
 
 ### 3.1 Hotkey Manager
 
-**职责**：注册全局热键，检测触发上下文，防抖处理。
+**职责**：注册全局热键，检测是否处于受支持文件对话框，执行防抖处理。
 
 **输入**：用户按键事件
-**输出**：触发信号（含上下文信息）
+**输出**：触发路径选择 UI
 
 **核心逻辑**：
 
@@ -352,8 +350,8 @@ OnCtrlG() {
     activeTitle := WinGetTitle(activeHwnd)
     
     ; 2. 上下文判断
-    context := DetectContext(activeClass, activeTitle)
-    if (context = "none")
+    context := DetectContext(activeClass, activeTitle, activeHwnd)
+    if (context != "dialog")
         return  ; 非目标窗口，不响应
     
     ; 3. 防抖：300ms 内不重复触发
@@ -363,7 +361,7 @@ OnCtrlG() {
     lastTrigger := A_TickCount
     
     ; 4. 触发路径收集与 UI 显示
-    ShowPathSelector(context, activeHwnd)
+    ShowPathSelector(activeHwnd)
 }
 ```
 
@@ -371,18 +369,13 @@ OnCtrlG() {
 
 | 窗口类名 | 上下文类型 | 说明 |
 |---------|-----------|------|
-| `CabinetWClass` | explorer | Windows Explorer 文件夹窗口 |
-| `ExploreWClass` | explorer | 旧版 Explorer |
 | `#32770` | dialog | 通用对话框（需进一步判断） |
-| `TTOTAL_CMD` | totalcmd | Total Commander |
-| `dopus.lister` | dopus | Directory Opus |
-| `XYplorer` | xyplorer | XYplorer |
 | 其他 | none | 忽略 |
 
 **对话框子判断**：`#32770` 类需要进一步判断是否为文件对话框：
-- 检查子控件是否存在 `ToolbarWindow32`（地址栏）
-- 检查窗口标题是否包含 "打开"、"保存"、"另存为"、"Open"、"Save" 等关键词
-- 检查父进程是否为常见应用程序（非 Explorer 本身）
+- 优先检查控件结构，识别地址栏、编辑框、面包屑或典型导航控件
+- 再结合窗口标题关键词做兜底判断
+- 避免单纯依赖标题，降低不同语言和宿主应用下的误判率
 
 **边缘情况**：
 - 热键冲突：用户可能已将 Ctrl+G 绑定到其他程序 → 提供配置项修改热键
@@ -955,78 +948,49 @@ ConfirmSelection(gui, listBox) {
 
 ### 3.7 Path Switcher
 
-**职责**：根据目标窗口类型执行路径跳转。
+**职责**：把选中的路径应用到当前文件对话框。
 
 **输入**：选中的 `PathEntry` 对象
 **输出**：跳转执行结果
 
 ```autohotkey
-ExecutePathSwitch(entry) {
-    activeHwnd := WinExist("A")
-    activeClass := WinGetClass(activeHwnd)
-    
-    ; 判断当前焦点窗口类型
-    if (activeClass = "#32770") {
-        ; 文件对话框模式
-        SwitchFileDialog(activeHwnd, entry.path)
-    }
-    else if (activeClass = "CabinetWClass" || activeClass = "ExploreWClass") {
-        ; Explorer 模式
-        NavigateExplorer(activeHwnd, entry.path)
-    }
-    else if (activeClass = "TTOTAL_CMD") {
-        ; Total Commander 模式
-        NavigateTotalCmd(activeHwnd, entry.path, "active")
-    }
-    else if (activeClass = "dopus.lister") {
-        ; Directory Opus 模式
-        NavigateDOpus(activeHwnd, entry.path)
-    }
-    else {
-        ; 未知类型，尝试通用方法
-        SwitchFileDialogFallback(activeHwnd, entry.path)
-    }
+ExecutePathSwitch(entry, targetHwnd := 0) {
+    if (!targetHwnd)
+        targetHwnd := WinExist("A")
+    if (!targetHwnd)
+        return
+
+    activeClass := WinGetClass(targetHwnd)
+    if (activeClass != "#32770")
+        return
+
+    SwitchFileDialog(targetHwnd, entry.path)
 }
 ```
 
 #### 文件对话框跳转
 
-**方法一**（优先）：COM 设置对话框路径
+**方法一**（优先）：控件级方案
 
 ```autohotkey
 SwitchFileDialog(hwnd, targetPath) {
-    ; 尝试通过 Shell Windows 找到对应的对话框
-    ; 文件对话框通常不暴露给 Shell.Application
-    ; 因此主要使用降级方案
-    SwitchFileDialogFallback(hwnd, targetPath)
+    ; 1. 优先定位地址栏或其可编辑子控件
+    ; 2. 直接写入路径并确认
+    ; 3. 失败后再走快捷键和通用按键兜底
 }
 ```
 
-**方法二**（降级）：模拟地址栏输入
+**方法二**（次优）：快捷键切入地址栏
 
 ```autohotkey
+TryNavigateFileDialogByShortcut(hwnd, targetPath) {
+    ; 1. 先尝试 Ctrl+L
+    ; 2. 失败后尝试 Alt+D
+    ; 3. 成功聚焦后写入路径并确认
+}
+
 SwitchFileDialogFallback(hwnd, targetPath) {
-    ; 1. 激活对话框
-    WinActivate("ahk_id " hwnd)
-    WinWaitActive("ahk_id " hwnd, , 1000)
-    
-    ; 2. 聚焦地址栏（Alt+D 或 Ctrl+L）
-    Send("!d")
-    Sleep(80)
-    
-    ; 3. 粘贴路径
-    A_Clipboard := targetPath
-    Sleep(50)
-    Send("^v")
-    Sleep(80)
-    
-    ; 4. 确认
-    Send("{Enter}")
-    Sleep(100)
-    
-    ; 5. 验证跳转是否成功
-    ; 检查地址栏当前值是否匹配
-    ; 如果不匹配，说明路径不存在或权限不足
+    ; 最后兜底才使用通用按键模拟
 }
 ```
 
@@ -1049,7 +1013,6 @@ theme=dark
 enable_explorer=1
 enable_totalcmd=1
 enable_dopus=1
-enable_xyplorer=0
 
 [ui]
 show_source_label=1
@@ -1072,7 +1035,6 @@ LoadConfig() {
         enable_explorer: IniRead(configPath, "adapters", "enable_explorer", 1),
         enable_totalcmd: IniRead(configPath, "adapters", "enable_totalcmd", 1),
         enable_dopus: IniRead(configPath, "adapters", "enable_dopus", 1),
-        enable_xyplorer: IniRead(configPath, "adapters", "enable_xyplorer", 0),
         show_source_label: IniRead(configPath, "ui", "show_source_label", 1),
         max_items: IniRead(configPath, "ui", "max_items", 12),
         sort_by: IniRead(configPath, "ui", "sort_by", "recent"),
@@ -1092,8 +1054,8 @@ LoadConfig() {
 ```
 PathEntry := {
     path: string,        ; 完整文件系统路径，如 "C:\Users\ZuoQi\Projects"
-    source: string,      ; 来源标识: "explorer" | "totalcmd" | "dopus" | "xyplorer"
-    label: string,       ; 显示标签，如 "Explorer", "TC (左)", "DOpus"
+    source: string,      ; 来源标识: "explorer" | "totalcmd" | "dopus"
+    label: string,       ; 显示标签，如 "Explorer", "TC (active)", "DOpus"
     hwnd: integer,       ; 所属窗口句柄（用于跳转时定位）
     panel: string,       ; 面板标识（仅 TC 使用）: "left" | "right"
     timestamp: integer   ; 最后检测时间戳（A_TickCount），用于去重和排序
@@ -1131,32 +1093,23 @@ g_IsRefreshing := false       ; 刷新锁（防止并发刷新）
 
 | 集成方式 | 技术 | 可靠性 |
 |---------|------|--------|
-| 路径获取 | 读取 `wincmd.ini` 配置文件 | 中高（有延迟） |
-| 路径获取（降级） | ControlGetText 读取路径面板 | 中 |
-| 路径跳转 | Ctrl+D → 粘贴 → Enter | 中 |
-| 路径跳转（推荐） | WM_COPYDATA 消息 | 高 |
+| 路径获取 | 内部窗口消息读取当前面板路径 | 高 |
+| 路径获取（补充） | 路径控件文本分析 | 中 |
+| 路径跳转 | 当前版本不作为热键直接触发目标 | — |
+| 路径跳转（内部能力） | 面板切换 + 路径写入 | 中 |
 
-**配置文件路径**：
-- `%APPDATA%\GHISLER\wincmd.ini`（推荐，用户级）
-- `%PROGRAMFILES%\totalcmd\wincmd.ini`（全局）
-
-**关键 INI 节**：
-```ini
-[left]
-path=C:\Users\ZuoQi\
-
-[right]
-path=D:\Data\
-```
+**当前实现说明**：
+- 当前会收集活动面板和非活动面板的路径
+- UI 标签显示为 `TC (active)` / `TC (inactive)`
+- 左右侧语义仍未完全稳定，因此不再展示 `left/right`
 
 ### 5.3 Directory Opus
 
 | 集成方式 | 技术 | 可靠性 |
 |---------|------|--------|
-| 路径获取 | DOpus COM 接口 | 高 |
+| 路径获取 | `DOpusRT /info ...,paths` | 高 |
 | 路径获取（降级） | 窗口标题解析 | 中 |
-| 路径跳转 | DOpusRT 命令行 | 高 |
-| 路径跳转（降级） | Ctrl+L → 粘贴 → Enter | 中 |
+| 路径跳转 | 当前版本不作为热键直接触发目标 | — |
 
 **DOpusRT 命令**：
 ```
@@ -1206,7 +1159,6 @@ COM 方法（优先）
 | `enable_explorer` | `1` | 启用 Explorer 支持 |
 | `enable_totalcmd` | `1` | 启用 Total Commander 支持 |
 | `enable_dopus` | `1` | 启用 Directory Opus 支持 |
-| `enable_xyplorer` | `0` | 启用 XYplorer 支持 |
 | `show_source_label` | `1` | 显示来源标签 |
 | `max_items` | `12` | 列表最大显示项数 |
 | `sort_by` | `recent` | 排序方式（recent/alphabetical） |
@@ -1363,8 +1315,8 @@ main.ahk
 | 单个 Explorer 窗口 | Win10 + Explorer | 菜单显示该窗口路径 |
 | 多个 Explorer 窗口 | Win11 + 多标签 | 菜单显示所有路径 |
 | 文件对话框跳转 | 任意应用 + 打开对话框 | 对话框跳转到目标路径 |
-| TC 双面板 | Total Commander 10+ | 左右面板路径分别显示 |
-| DOpus 多标签 | Directory Opus 12+ | 所有标签页路径显示 |
+| TC 路径收集 | Total Commander 10+ | 列表显示 active / inactive 两条路径 |
+| DOpus 多标签 | Directory Opus 12+ | 当前标签页路径可被稳定收集 |
 | 无文件管理器窗口 | 干净桌面 | 提示"没有打开的文件夹窗口" |
 | 路径不存在 | 目标路径已删除 | 提示"路径不存在" |
 | 热键自定义 | 修改 config.ini | 新热键生效 |
@@ -1394,7 +1346,7 @@ GetProcessMemory() {
 | 模糊搜索 | 在路径列表中实时过滤 | 低（ListBox 自带过滤） |
 | 收藏夹 | 保存常用路径 | 中（需要持久化存储） |
 | 最近访问历史 | 记录跳转历史 | 低（追加写入日志） |
-| XYplorer 支持 | 第四个文件管理器 | 低（类似其他 Adapter） |
+| XYplorer 支持 | 后续如有需要再补充 | 中 |
 | 鼠标悬停预览 | 悬停显示文件夹内容 | 中（需要文件系统读取） |
 | 网络路径支持 | UNC 路径跳转 | 低（路径处理兼容） |
 
