@@ -49,13 +49,21 @@ CollectDOpusPathsViaDOpusRT() {
                 hwnd := ParseDOpusListerHandle(listerAttr)
                 side := node.getAttribute("side")
                 activeTab := node.getAttribute("active_tab")
-                label := BuildDOpusLabel(side, activeTab)
+                ; side 表示该tab所在的窗格，activeTab 表示该tab是否为当前可见tab以及位于哪一侧
+                sideName := GetDOpusPaneName(side)
+                activeSideName := GetDOpusPaneName(activeTab)
+                ; activeTab 属性存在表示该tab是当前可见的
+                isVisibleTab := activeTab != ""
+                label := BuildDOpusLabel(sideName, activeSideName, isVisibleTab)
 
                 paths.Push({
                     path: pathText,
                     source: "dopus",
                     label: label,
                     hwnd: hwnd,
+                    panel: sideName,
+                    panelSide: sideName,
+                    isVisibleTab: isVisibleTab,
                     timestamp: A_TickCount
                 })
                 LogInfo("Add DOpus path via DOpusRT: " pathText " [" label "]")
@@ -134,20 +142,48 @@ ParseDOpusListerHandle(listerAttr) {
     return Integer("0x" listerAttr)
 }
 
-BuildDOpusLabel(side, activeTab) {
-    sideLabel := ""
-    if (side = "0")
-        sideLabel := "left"
-    else if (side = "1")
-        sideLabel := "right"
+GetDOpusPaneName(sideValue) {
+    ; DOpus 官方定义：1 = left/top，2 = right/bottom
+    normalized := Trim(sideValue, " `t`r`n")
+    if (normalized = "1")
+        return "左"
+    if (normalized = "2")
+        return "右"
+    return ""
+}
 
-    if (sideLabel != "")
-        return "DOpus (" sideLabel ")"
+BuildDOpusLabel(sideName, activeSideName, isVisibleTab) {
+    ; 构建标签：同时表达窗格方向和可见性
+    ; sideName: tab所在窗格（来自 side 属性）
+    ; activeSideName: 当前可见tab所在窗格（来自 active_tab 属性）
+    ; isVisibleTab: 该tab是否为当前可见tab
+    labelParts := []
 
-    if (activeTab != "")
-        return "DOpus (active)"
+    ; 优先使用 active_tab 信息（表示当前可见tab的位置）
+    if (isVisibleTab && activeSideName != "") {
+        labelParts.Push(activeSideName)
+        labelParts.Push("可见")
+    } else if (sideName != "") {
+        ; 降级：如果不是可见tab或activeSideName为空，使用side信息
+        labelParts.Push(sideName)
+    }
 
-    return "DOpus"
+    if (labelParts.Length = 0)
+        return "DOpus"
+
+    return "DOpus (" JoinDOpusLabelParts(labelParts) ")"
+}
+
+JoinDOpusLabelParts(parts) {
+    result := ""
+
+    for index, part in parts {
+        if (index > 1)
+            result .= ", "
+        result .= part
+    }
+
+    return result
 }
 
 ExtractPathFromDOpusTitle(title) {
