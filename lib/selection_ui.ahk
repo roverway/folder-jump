@@ -1,4 +1,4 @@
-﻿; ============================================================
+; ============================================================
 ; Selection UI — FolderJump
 ; 浮动菜单 GUI（键盘导航、自动关闭）
 ; ============================================================
@@ -61,6 +61,14 @@ ShowPathSelector(context, activeHwnd) {
 
     if (g_PathCache.Length = 0) {
         TrayTip("FolderJump", "没有打开的文件夹窗口", 2000)
+        return
+    }
+
+    ; 如果只有一个可选路径，直接跳转，不再显示选择菜单
+    if (g_PathCache.Length = 1) {
+        entry := g_PathCache[1]
+        LogInfo("仅存在一个可选路径，直接跳转: " entry.path " [" entry.label "]")
+        ExecutePathSwitch(entry, activeHwnd)
         return
     }
 
