@@ -6,6 +6,8 @@
 #Include "%A_ScriptDir%\lib\log_manager.ahk"
 #Include "%A_ScriptDir%\lib\utils.ahk"
 
+global g_TC_WMCOPYDATA_Result := ""
+
 CollectTotalCmdPaths() {
     paths := []
 
@@ -17,9 +19,24 @@ CollectTotalCmdPaths() {
 
         for hwnd in tcWindows {
             try {
-                panelPaths := GetTCPathsViaAPI(hwnd)
-                if (panelPaths.Length = 0)
-                    panelPaths := GetTCPathsViaWinGetText(hwnd)
+                panelPaths := GetTCPathsViaWM_COPYDATA(hwnd)
+                
+                ; 无论 API 获取到多少个，如果没找全，再用 WinGetText 兜底补充
+                if (panelPaths.Length < 2) {
+                    fallbackPaths := GetTCPathsViaWinGetText(hwnd)
+                    for fp in fallbackPaths {
+                        hasMatched := false
+                        for pp in panelPaths {
+                            if (pp.path == fp.path) {
+                                hasMatched := true
+                                break
+                            }
+                        }
+                        if (!hasMatched) {
+                            panelPaths.Push(fp)
+                        }
+                    }
+                }
 
                 for panelPath in panelPaths {
                     LogDebug("Inspect TC path: " panelPath.path " [" panelPath.panelRole "/" panelPath.panelSide "]")
@@ -53,91 +70,75 @@ CollectTotalCmdPaths() {
     return paths
 }
 
-GetTCPathsViaAPI(hwnd) {
+GetTCPathsViaWM_COPYDATA(hwnd) {
+    global g_TC_WMCOPYDATA_Result
     paths := []
 
     try {
-        activePathHwnd := SendMessage(1074, 17, , , "ahk_id " hwnd)
-        inactivePathHwnd := SendMessage(1074, 18, , , "ahk_id " hwnd)
-        panelSides := GetTCPanelSidesFromControls(activePathHwnd, inactivePathHwnd, hwnd)
+        ; 注册监听，仅在接收时用
+        OnMessage(0x004A, ReceiveTC_WM_COPYDATA)
 
-        LogDebug("TC active path control hwnd: " activePathHwnd)
-        LogDebug("TC inactive path control hwnd: " inactivePathHwnd)
+        QueryTC := (cmd) => (
+            g_TC_WMCOPYDATA_Result := "",
+            cmdStr := cmd,
+            cbData := StrPut(cmdStr, "CP0"),
+            StrBuf := Buffer(cbData),
+            StrPut(cmdStr, StrBuf, "CP0"),
+            CopyDataStruct := Buffer(3 * A_PtrSize),
+            NumPut("Ptr", Ord("G") + 256 * Ord("W"), CopyDataStruct, 0), ; GW
+            NumPut("UInt", cbData, CopyDataStruct, A_PtrSize),
+            NumPut("Ptr", StrBuf.Ptr, CopyDataStruct, 2 * A_PtrSize),
+            SendMessage(0x004A, A_ScriptHwnd, CopyDataStruct.Ptr, , "ahk_id " hwnd),
+            g_TC_WMCOPYDATA_Result
+        )
 
-        if (activePathHwnd && activePathHwnd > 0) {
-            try {
-                activePath := NormalizeTCPathText(ControlGetText("ahk_id " activePathHwnd))
-                if (activePath && RegExMatch(activePath, "^[A-Za-z]:")) {
-                    paths.Push({
-                        path: activePath,
-                        panelRole: "active",
-                        panelSide: panelSides.active
-                    })
-                }
-            } catch as err {
-                LogWarn("Failed to read active TC panel path: " err.Message)
-            }
+        ; LP=左面板, RP=右面板, SP=活动面板
+        leftPath := NormalizeTCPathText(QueryTC("LP"))
+        rightPath := NormalizeTCPathText(QueryTC("RP"))
+        activePath := NormalizeTCPathText(QueryTC("SP"))
+
+        LogDebug("TC Left Path: " leftPath)
+        LogDebug("TC Right Path: " rightPath)
+        LogDebug("TC Active Path: " activePath)
+
+        added := Map()
+        
+        if (leftPath && RegExMatch(leftPath, "^[A-Za-z]:") && !added.Has(leftPath)) {
+            paths.Push({
+                path: leftPath,
+                panelRole: (leftPath == activePath) ? "active" : "inactive",
+                panelSide: "left"
+            })
+            added[leftPath] := true
         }
 
-        if (inactivePathHwnd && inactivePathHwnd > 0) {
-            try {
-                inactivePath := NormalizeTCPathText(ControlGetText("ahk_id " inactivePathHwnd))
-                if (inactivePath && RegExMatch(inactivePath, "^[A-Za-z]:")) {
-                    paths.Push({
-                        path: inactivePath,
-                        panelRole: "inactive",
-                        panelSide: panelSides.inactive
-                    })
-                }
-            } catch as err {
-                LogWarn("Failed to read inactive TC panel path: " err.Message)
-            }
+        if (rightPath && RegExMatch(rightPath, "^[A-Za-z]:") && !added.Has(rightPath)) {
+            paths.Push({
+                path: rightPath,
+                panelRole: (rightPath == activePath) ? "active" : "inactive",
+                panelSide: "right"
+            })
+            added[rightPath] := true
         }
+
     } catch as err {
-        LogWarn("TC API path collection failed: " err.Message)
+        LogWarn("TC WM_COPYDATA path collection failed: " err.Message)
     }
 
     return paths
 }
 
-GetTCPanelSidesFromControls(activePathHwnd, inactivePathHwnd, hwnd) {
-    result := {
-        active: "",
-        inactive: ""
-    }
-
-    if (!(activePathHwnd && inactivePathHwnd))
-        return result
-
+ReceiveTC_WM_COPYDATA(wParam, lParam, msg, hwnd) {
+    global g_TC_WMCOPYDATA_Result
+    
     try {
-        leftPathHwnd := SendMessage(1074, 9, , , "ahk_id " hwnd)
-        rightPathHwnd := SendMessage(1074, 10, , , "ahk_id " hwnd)
-
-        if (activePathHwnd && leftPathHwnd && activePathHwnd == leftPathHwnd) {
-            result.active := "left"
-            result.inactive := "right"
-            return result
-        } else if (activePathHwnd && rightPathHwnd && activePathHwnd == rightPathHwnd) {
-            result.active := "right"
-            result.inactive := "left"
-            return result
-        }
-
-        ControlGetPos(&activeX, , , , "ahk_id " activePathHwnd)
-        ControlGetPos(&inactiveX, , , , "ahk_id " inactivePathHwnd)
-
-        if (activeX <= inactiveX) {
-            result.active := "left"
-            result.inactive := "right"
-        } else {
-            result.active := "right"
-            result.inactive := "left"
-        }
-    } catch as err {
-        LogWarn("Failed to infer TC panel sides from control positions: " err.Message)
+        cbData := NumGet(lParam, A_PtrSize, "UInt")
+        lpData := NumGet(lParam, 2 * A_PtrSize, "Ptr")
+        
+        ; 使用 UTF-16 解析返回的字符串
+        g_TC_WMCOPYDATA_Result := StrGet(lpData, "UTF-16")
     }
-
-    return result
+    return 1
 }
 
 NormalizeTCPathText(pathText) {
