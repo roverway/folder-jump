@@ -43,36 +43,36 @@ jobs:
       - name: Compile FolderJump (AHK v2)
         shell: powershell
         run: |
-          # Find AutoHotkey64.exe recursively
-          $ahkFiles = Get-ChildItem -Path "_setup/ahk" -Name "AutoHotkey64.exe" -Recurse -ErrorAction SilentlyContinue
+          # Find AutoHotkey64.exe recursively - ensure array
+          $ahkFiles = @(Get-ChildItem -Path "_setup/ahk" -Filter "AutoHotkey64.exe" -Recurse -File -ErrorAction SilentlyContinue)
           if ($ahkFiles.Count -eq 0) {
-              throw "Error: Could not find AutoHotkey64.exe in _setup/ahk"
+              throw "Error: Could not find AutoHotkey64.exe"
           }
-          $ahkBase = Join-Path "_setup/ahk" $ahkFiles[0]
+          $ahkBase = $ahkFiles[0].FullName
           
-          # Find Ahk2Exe.exe recursively
-          $exeFiles = Get-ChildItem -Path "_setup/a2e" -Name "Ahk2Exe.exe" -Recurse -ErrorAction SilentlyContinue
+          # Find Ahk2Exe.exe recursively - ensure array
+          $exeFiles = @(Get-ChildItem -Path "_setup/a2e" -Filter "Ahk2Exe.exe" -Recurse -File -ErrorAction SilentlyContinue)
           if ($exeFiles.Count -eq 0) {
-              throw "Error: Could not find Ahk2Exe.exe in _setup/a2e"
+              throw "Error: Could not find Ahk2Exe.exe"
           }
-          $compiler = Join-Path "_setup/a2e" $exeFiles[0]
+          $compiler = $exeFiles[0].FullName
           
           Write-Host "Found AutoHotkey base: $ahkBase"
           Write-Host "Found Ahk2Exe compiler: $compiler"
           
           # Verify files exist
           if (-not (Test-Path $ahkBase)) {
-              throw "Error: AutoHotkey64.exe not accessible at $ahkBase"
+              throw "Error: AutoHotkey64.exe not accessible"
           }
           if (-not (Test-Path $compiler)) {
-              throw "Error: Ahk2Exe.exe not accessible at $compiler"
+              throw "Error: Ahk2Exe.exe not accessible"
           }
           
           Write-Host "Compiling main.ahk..."
           
           # Build compilation command
-          $args = "/in", "main.ahk", "/out", "FolderJump.exe", "/base", $ahkBase, "/cp", "65001"
-          Write-Host "Running: $compiler $args"
+          $args = @("/in", "main.ahk", "/out", "FolderJump.exe", "/base", $ahkBase, "/cp", "65001")
+          Write-Host "Running: $compiler $($args -join ' ')"
           
           # Execute compiler
           & $compiler $args
