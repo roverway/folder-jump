@@ -18,12 +18,12 @@ jobs:
           fetch-depth: 0
 
       - name: Compile FolderJump with Ahk2Exe
-        uses: tamo/action-Ahk2Exe@v1
+        uses: tamo/action-Ahk2Exe@main
         with:
-          in: main.ahk
-          out: FolderJump.exe
+          src: main.ahk
           taghead: v2
           base: AutoHotkey64.exe
+          opt: /out FolderJump.exe
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
