@@ -9,11 +9,11 @@
 CollectTotalCmdPaths() {
     paths := []
 
-    LogInfo("Start collecting Total Commander paths")
+    LogDebug("Start collecting Total Commander paths")
 
     try {
         tcWindows := WinGetList("ahk_class TTOTAL_CMD")
-        LogInfo("Found Total Commander windows: " tcWindows.Length)
+        LogDebug("Found Total Commander windows: " tcWindows.Length)
 
         for hwnd in tcWindows {
             try {
@@ -22,9 +22,9 @@ CollectTotalCmdPaths() {
                     panelPaths := GetTCPathsViaWinGetText(hwnd)
 
                 for panelPath in panelPaths {
-                    LogInfo("Inspect TC path: " panelPath.path " [" panelPath.panelRole "/" panelPath.panelSide "]")
+                    LogDebug("Inspect TC path: " panelPath.path " [" panelPath.panelRole "/" panelPath.panelSide "]")
                     if (!(panelPath.path && DirExist(panelPath.path))) {
-                        LogInfo("Skip invalid TC path: " panelPath.path)
+                        LogDebug("Skip invalid TC path: " panelPath.path)
                         continue
                     }
 
@@ -39,7 +39,7 @@ CollectTotalCmdPaths() {
                         panelSide: panelPath.panelSide,
                         timestamp: A_TickCount
                     })
-                    LogInfo("Add TC path: " panelPath.path " [" label "]")
+                    LogDebug("Add TC path: " panelPath.path " [" label "]")
                 }
             } catch as innerErr {
                 LogWarn("Failed to process TC window: " innerErr.Message)
@@ -49,7 +49,7 @@ CollectTotalCmdPaths() {
         LogWarn("Failed to collect Total Commander paths: " err.Message)
     }
 
-    LogInfo("Collected Total Commander paths: " paths.Length)
+    LogDebug("Collected Total Commander paths: " paths.Length)
     return paths
 }
 
@@ -59,10 +59,10 @@ GetTCPathsViaAPI(hwnd) {
     try {
         activePathHwnd := SendMessage(1074, 17, , , "ahk_id " hwnd)
         inactivePathHwnd := SendMessage(1074, 18, , , "ahk_id " hwnd)
-        panelSides := GetTCPanelSidesFromControls(activePathHwnd, inactivePathHwnd)
+        panelSides := GetTCPanelSidesFromControls(activePathHwnd, inactivePathHwnd, hwnd)
 
-        LogInfo("TC active path control hwnd: " activePathHwnd)
-        LogInfo("TC inactive path control hwnd: " inactivePathHwnd)
+        LogDebug("TC active path control hwnd: " activePathHwnd)
+        LogDebug("TC inactive path control hwnd: " inactivePathHwnd)
 
         if (activePathHwnd && activePathHwnd > 0) {
             try {
@@ -100,7 +100,7 @@ GetTCPathsViaAPI(hwnd) {
     return paths
 }
 
-GetTCPanelSidesFromControls(activePathHwnd, inactivePathHwnd) {
+GetTCPanelSidesFromControls(activePathHwnd, inactivePathHwnd, hwnd) {
     result := {
         active: "",
         inactive: ""
@@ -110,6 +110,19 @@ GetTCPanelSidesFromControls(activePathHwnd, inactivePathHwnd) {
         return result
 
     try {
+        leftPathHwnd := SendMessage(1074, 9, , , "ahk_id " hwnd)
+        rightPathHwnd := SendMessage(1074, 10, , , "ahk_id " hwnd)
+
+        if (activePathHwnd && leftPathHwnd && activePathHwnd == leftPathHwnd) {
+            result.active := "left"
+            result.inactive := "right"
+            return result
+        } else if (activePathHwnd && rightPathHwnd && activePathHwnd == rightPathHwnd) {
+            result.active := "right"
+            result.inactive := "left"
+            return result
+        }
+
         ControlGetPos(&activeX, , , , "ahk_id " activePathHwnd)
         ControlGetPos(&inactiveX, , , , "ahk_id " inactivePathHwnd)
 
@@ -149,7 +162,7 @@ GetTCPathsViaWinGetText(hwnd) {
         allText := WinGetText("ahk_id " hwnd)
         DetectHiddenText(oldSetting)
 
-        LogInfo("TC WinGetText length: " StrLen(allText))
+        LogDebug("TC WinGetText length: " StrLen(allText))
 
         panelSides := ["left", "right"]
         index := 1

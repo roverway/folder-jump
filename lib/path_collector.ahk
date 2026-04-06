@@ -1,4 +1,4 @@
-﻿; ============================================================
+; ============================================================
 ; Path Collector - FolderJump
 ; Collect, deduplicate, and sort paths from enabled adapters
 ; ============================================================
@@ -49,7 +49,7 @@ DeduplicatePaths(paths) {
     pathMap := Map()
 
     for entry in paths {
-        normalized := NormalizePath(entry.path)
+        normalized := NormalizePathString(entry.path)
         if (!pathMap.Has(normalized) || entry.timestamp > pathMap[normalized].timestamp)
             pathMap[normalized] := entry
     }
@@ -88,8 +88,8 @@ SortPaths(paths) {
 }
 
 ComparePathEntriesByName(a, b) {
-    normalizedA := NormalizePath(a.path)
-    normalizedB := NormalizePath(b.path)
+    normalizedA := NormalizePathString(a.path)
+    normalizedB := NormalizePathString(b.path)
 
     if (normalizedA < normalizedB)
         return -1

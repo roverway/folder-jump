@@ -179,7 +179,8 @@ ShowPathSelector(context, activeHwnd) {
 
     ; 使用 AHK v2 的 InputHook 捕获 Enter 键
     enterHook := InputHook("V")
-    enterHook.OnEnter := ListBoxEnterPressed.Bind(listBox)
+    enterHook.KeyOpt("{Enter}", "N")
+    enterHook.OnKeyDown := ListBoxEnterPressed.Bind(listBox)
     enterHook.Start()
 
     ; 保存引用以便清理
@@ -224,17 +225,19 @@ ListBoxChange(GuiCtrlObj, *) {
 
 ; Enter 键确认（通过 InputHook 捕获）
 ; 执行路径跳转并关闭 GUI
-ListBoxEnterPressed(listBox, *) {
+ListBoxEnterPressed(listBox, hook, vk, sc, *) {
     global g_CurrentGui, g_PathCache
-    try {
-        selectedIndex := listBox.Value
-        if (selectedIndex > 0 && selectedIndex <= g_PathCache.Length) {
-            entry := g_PathCache[selectedIndex]
-            LogInfo("用户选择路径(Enter): " entry.path " [" entry.label "]")
-            ; 使用保存的目标窗口句柄，而不是当前活动窗口（因为当前是 FolderJump GUI）
-            targetHwnd := g_CurrentGui.HasOwnProp("targetHwnd") ? g_CurrentGui.targetHwnd : 0
-            ExecutePathSwitch(entry, targetHwnd)
-            CleanupGui(g_CurrentGui)
+    if (vk = 13) {
+        try {
+            selectedIndex := listBox.Value
+            if (selectedIndex > 0 && selectedIndex <= g_PathCache.Length) {
+                entry := g_PathCache[selectedIndex]
+                LogInfo("用户选择路径(Enter): " entry.path " [" entry.label "]")
+                ; 使用保存的目标窗口句柄，而不是当前活动窗口（因为当前是 FolderJump GUI）
+                targetHwnd := g_CurrentGui.HasOwnProp("targetHwnd") ? g_CurrentGui.targetHwnd : 0
+                ExecutePathSwitch(entry, targetHwnd)
+                CleanupGui(g_CurrentGui)
+            }
         }
     }
 }
@@ -275,6 +278,8 @@ GuiAutoClose(pathGui) {
 ; 在所有关闭路径中统一调用，确保资源正确释放
 CleanupGui(pathGui) {
     global g_CurrentGui
+    if (!IsSet(g_CurrentGui) || !g_CurrentGui)
+        return
     ; 停止超时定时器（如果存在）
     if (IsSet(pathGui) && pathGui && pathGui.HasOwnProp("autoCloseTimer")) {
         try SetTimer(pathGui.autoCloseTimer, 0)

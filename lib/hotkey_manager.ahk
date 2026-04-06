@@ -1,4 +1,4 @@
-﻿; ============================================================
+; ============================================================
 ; 热键管理模块 - FolderJump
 ; 负责热键注册、上下文检测与防抖
 ; ============================================================
@@ -41,8 +41,8 @@ HasFileDialogControls(hwnd) {
     shellSignals := 0
 
     for control in controls {
-        controlClass := GetDialogControlClassSafe(control, hwnd)
-        controlText := StrLower(GetDialogControlTextSafe(control, hwnd))
+        controlClass := GetControlClassSafe(control, hwnd)
+        controlText := StrLower(GetControlTextSafe(control, hwnd))
 
         if (InStr(controlClass, "Edit"))
             fileNameSignals += 1
@@ -80,22 +80,6 @@ TitleLooksLikeFileDialog(title) {
     }
 
     return false
-}
-
-GetDialogControlClassSafe(control, hwnd) {
-    try {
-        return ControlGetClassNN(control, "ahk_id " hwnd)
-    } catch {
-        return control
-    }
-}
-
-GetDialogControlTextSafe(control, hwnd) {
-    try {
-        return ControlGetText(control, "ahk_id " hwnd)
-    } catch {
-        return ""
-    }
 }
 
 OnCtrlG(*) {

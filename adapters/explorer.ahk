@@ -16,7 +16,8 @@ CollectExplorerPaths() {
         return paths
     }
 
-    for window in shell.Windows {
+    try {
+        for window in shell.Windows {
         try {
             ; 跳过非 Explorer 窗口（如 IE）
             if (window.LocationName = "")
@@ -43,6 +44,9 @@ CollectExplorerPaths() {
                 timestamp: A_TickCount
             })
         }
+        }
+    } catch as err {
+        LogWarn("Shell.Windows 枚举中断: " err.Message)
     }
 
     LogDebug("Explorer 路径收集: " paths.Length " 个窗口")

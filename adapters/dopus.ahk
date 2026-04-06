@@ -23,7 +23,7 @@ CollectDOpusPathsViaDOpusRT() {
         return paths
     }
 
-    tempFile := A_Temp "\folderjump-dopus-paths-" A_TickCount ".xml"
+    tempFile := A_Temp "\folderjump-dopus-paths.xml"
 
     try {
         RunWait('"' dopusrtPath '" /info "' tempFile '",paths', , "Hide")
@@ -41,7 +41,7 @@ CollectDOpusPathsViaDOpusRT() {
 
         for node in xml.selectNodes("//path[@active_tab]") {
             try {
-                pathText := NormalizeDOpusPathCandidate(node.text)
+                pathText := NormalizePathString(node.text)
                 if (!(pathText && DirExist(pathText)))
                     continue
 
@@ -195,18 +195,18 @@ ExtractPathFromDOpusTitle(title) {
     title := RegExReplace(title, "\s+-\s+Opus$")
     title := Trim(title)
 
-    candidate := NormalizeDOpusPathCandidate(title)
+    candidate := NormalizePathString(title)
     if (candidate && DirExist(candidate))
         return candidate
 
     if (RegExMatch(title, "i)([A-Z]:\\[^<>:\x22|?*\r\n]+)", &match)) {
-        candidate := NormalizeDOpusPathCandidate(match[1])
+        candidate := NormalizePathString(match[1])
         if (candidate && DirExist(candidate))
             return candidate
     }
 
     if (RegExMatch(title, "(\\\\[^\\\/:*?\x22<>|\r\n]+\\[^<>:\x22|?*\r\n]+)", &uncMatch)) {
-        candidate := NormalizeDOpusPathCandidate(uncMatch[1])
+        candidate := NormalizePathString(uncMatch[1])
         if (candidate && DirExist(candidate))
             return candidate
     }
@@ -214,18 +214,21 @@ ExtractPathFromDOpusTitle(title) {
     return ""
 }
 
-NormalizeDOpusPathCandidate(path) {
-    path := Trim(path, " `t`r`n")
-    path := StrReplace(path, "/", "\")
 
-    if (StrLen(path) > 3 && SubStr(path, -1) = "\")
-        path := SubStr(path, 1, -1)
-
-    return path
-}
 
 
 FindDOpusRT() {
+    try {
+        appPath := RegRead("HKLM\SOFTWARE\GPSoftware\Directory Opus", "AppPath")
+        if (appPath) {
+            dopusrt := appPath "\dopusrt.exe"
+            if (FileExist(dopusrt))
+                return dopusrt
+        }
+    } catch {
+        ; Registry key not found, continue to fallback
+    }
+
     static candidates := [
         "C:\Program Files\GPSoftware\Directory Opus\dopusrt.exe",
         "C:\Program Files (x86)\GPSoftware\Directory Opus\dopusrt.exe"

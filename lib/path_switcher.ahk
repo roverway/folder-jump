@@ -73,7 +73,7 @@ TryNavigateFileDialogFast(hwnd, targetPath) {
         }
         
         ; 1. 备份原文件名（因为用户可能已经在另存为对话框输入了要保存的文件名）
-        originalText := ControlGetText(editControl, "ahk_id " hwnd)
+        originalText := GetControlTextSafe(editControl, hwnd)
         
         ; 2. 聚焦文件名输入框，并修改为目标跳转路径
         ControlFocus(editControl, "ahk_id " hwnd)
@@ -85,14 +85,21 @@ TryNavigateFileDialogFast(hwnd, targetPath) {
         ; 3. 发送回车执行路径跳转
         ControlSend("{Enter}", editControl, "ahk_id " hwnd)
         
-        ; 短暂睡眠等待对话框开始跳转反应 (约 30ms 后恢复，肉眼基本不可察觉)
-        Sleep(30)
+        ; 4. 等待对话框完成跳转
+        navigatesOk := WaitForFileDialogPath(hwnd, targetPath, 1.0)
         
-        ; 4. 瞬间恢复用户原本输入的文件名
-        ControlSetText(originalText, editControl, "ahk_id " hwnd)
+        ; 5. 瞬间恢复用户原本输入的文件名，前提是窗口仍然存在
+        if (WinExist("ahk_id " hwnd)) {
+            ControlSetText(originalText, editControl, "ahk_id " hwnd)
+        }
         
-        LogInfo("Fast Edit1 navigation executed successfully: " targetPath)
-        return true
+        if (navigatesOk) {
+            LogInfo("Fast Edit1 navigation executed successfully: " targetPath)
+            return true
+        } else {
+            LogWarn("Fast Edit1 navigation couldn't be verified within timeout")
+            return false
+        }
     } catch as err {
         LogWarn("Fast Edit1 navigation failed: " err.Message)
         return false
@@ -230,7 +237,7 @@ SwitchFileDialogFallback(hwnd, targetPath) {
 
 ActivateTargetWindow(hwnd) {
     WinActivate("ahk_id " hwnd)
-    if (!WinWaitActive("ahk_id " hwnd, , 2000)) {
+    if (!WinWaitActive("ahk_id " hwnd, , 2)) {
         LogError("Failed to activate target window: ahk_id " hwnd)
         return false
     }
@@ -248,8 +255,8 @@ FindFileDialogEditableControl(hwnd) {
     bestGenericEdit := ""
 
     for control in controls {
-        className := GetFileDialogControlClassSafe(control, hwnd)
-        text := GetFileDialogControlTextSafe(control, hwnd)
+        className := GetControlClassSafe(control, hwnd)
+        text := GetControlTextSafe(control, hwnd)
         loweredText := StrLower(text)
         loweredClass := StrLower(className)
 
@@ -292,7 +299,7 @@ LooksLikeAddressBarControl(control, className, loweredText) {
 }
 
 IsEditableDialogControl(hwnd, control) {
-    className := GetFileDialogControlClassSafe(control, hwnd)
+    className := GetControlClassSafe(control, hwnd)
     return InStr(StrLower(className), "edit")
 }
 
@@ -349,11 +356,12 @@ GetFileDialogControlClassSafe(control, hwnd) {
     }
 }
 
-WaitForFileDialogPath(hwnd, targetPath) {
-    normalizedTarget := NormalizeFileDialogPath(targetPath)
+WaitForFileDialogPath(hwnd, targetPath, timeoutSec := 1.5) {
+    normalizedTarget := NormalizePathString(targetPath)
+    iterations := Ceil(timeoutSec * 1000 / 50)
 
-    Loop 10 {
-        Sleep(150)
+    Loop iterations {
+        Sleep(50)
 
         if (!WinExist("ahk_id " hwnd)) {
             LogWarn("File dialog closed before navigation could be verified")
@@ -373,11 +381,11 @@ FileDialogContainsPath(hwnd, normalizedTarget) {
         return false
 
     for control in controls {
-        text := GetFileDialogControlTextSafe(control, hwnd)
+        text := GetControlTextSafe(control, hwnd)
         if (!text)
             continue
 
-        normalizedText := NormalizeFileDialogPath(text)
+        normalizedText := NormalizePathString(text)
         if (InStr(normalizedText, normalizedTarget))
             return true
     }
@@ -385,20 +393,3 @@ FileDialogContainsPath(hwnd, normalizedTarget) {
     return false
 }
 
-GetFileDialogControlTextSafe(control, hwnd) {
-    try {
-        return ControlGetText(control, "ahk_id " hwnd)
-    } catch {
-        return ""
-    }
-}
-
-NormalizeFileDialogPath(pathText) {
-    pathText := StrReplace(pathText, "/", "\")
-    pathText := Trim(pathText, " `t`r`n")
-
-    if (StrLen(pathText) > 3 && SubStr(pathText, -1) = "\")
-        pathText := SubStr(pathText, 1, -1)
-
-    return StrLower(pathText)
-}
