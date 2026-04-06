@@ -23,7 +23,7 @@ jobs:
           src: main.ahk
           taghead: v2
           base: AutoHotkey64.exe
-          opt: /out FolderJump.exe
+          opt: /out FolderJump.exe /cp 65001
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
