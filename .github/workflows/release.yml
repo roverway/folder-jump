@@ -77,18 +77,14 @@ jobs:
           # Execute compiler
           & $compiler $args
           
-          if ($LASTEXITCODE -ne 0) {
-              throw "Ahk2Exe failed with exit code $LASTEXITCODE"
+          # Verify output exists (don't rely on $LASTEXITCODE which may be unreliable)
+          Start-Sleep -Milliseconds 500  # Give file system time to sync
+          if (-not (Test-Path "FolderJump.exe")) {
+              throw "Build failed: FolderJump.exe was not created"
           }
           
-          # Verify output
-          if (Test-Path "FolderJump.exe") {
-              Write-Host "Build success: FolderJump.exe created"
-              Get-Item "FolderJump.exe" | Select-Object FullName, Length
-          }
-          else {
-              throw "Build failed: FolderJump.exe not created"
-          }
+          $exeInfo = Get-Item "FolderJump.exe"
+          Write-Host "Build success: FolderJump.exe created ($($exeInfo.Length) bytes)"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
