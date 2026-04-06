@@ -179,7 +179,7 @@ ShowPathSelector(context, activeHwnd) {
 
     ; 使用 AHK v2 的 InputHook 捕获 Enter 键
     enterHook := InputHook("V")
-    enterHook.KeyOpt("{Enter}", "N")
+    enterHook.KeyOpt("{Enter}", "NS") ; 'N' Notify, 'S' Suppress 以拦截原始按键
     enterHook.OnKeyDown := ListBoxEnterPressed.Bind(listBox)
     enterHook.Start()
 
@@ -198,9 +198,13 @@ ListBoxConfirm(GuiCtrlObj, *) {
         LogInfo("用户选择路径(双击): " entry.path " [" entry.label "]")
         ; 使用保存的目标窗口句柄，而不是当前活动窗口（因为当前是 FolderJump GUI）
         targetHwnd := g_CurrentGui.HasOwnProp("targetHwnd") ? g_CurrentGui.targetHwnd : 0
+        
+        ; 提前清理 GUI，恢复目标窗口焦点
+        CleanupGui(g_CurrentGui)
         ExecutePathSwitch(entry, targetHwnd)
+    } else {
+        CleanupGui(g_CurrentGui)
     }
-    CleanupGui(g_CurrentGui)
 }
 
 ; ListBox 变更事件（用于键盘导航时记录当前选择）
@@ -235,8 +239,14 @@ ListBoxEnterPressed(listBox, hook, vk, sc, *) {
                 LogInfo("用户选择路径(Enter): " entry.path " [" entry.label "]")
                 ; 使用保存的目标窗口句柄，而不是当前活动窗口（因为当前是 FolderJump GUI）
                 targetHwnd := g_CurrentGui.HasOwnProp("targetHwnd") ? g_CurrentGui.targetHwnd : 0
-                ExecutePathSwitch(entry, targetHwnd)
+                
+                ; 先清理 GUI 释放 InputHook 和恢复焦点
                 CleanupGui(g_CurrentGui)
+                
+                ; 等待用户松开回车键，彻底杜绝回车残留事件导致目标对话框关闭
+                KeyWait("Enter")
+                
+                ExecutePathSwitch(entry, targetHwnd)
             }
         }
     }
