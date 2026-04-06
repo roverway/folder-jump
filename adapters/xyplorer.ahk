@@ -48,8 +48,9 @@ CollectPathsFromXYplorerInstance(hwnd) {
     ; XYplorer script: 
     ; $dp 判断双面板 (基于命令状态 #800)
     ; $pane 获取当前活动面板 (1或2)
-    ; $p_i 获取非活动面板当前标签路径 (仅在双窗格开启时，使用官方 'i' 参数)
-    xyScript := '::$dp = get("#800"); $pane = get("pane"); $p_i = ""; if ($dp == 1) { $p_i = tab("get", "path", , "i"); } writefile("' tempFile '", <curpath> . "<crlf>" . $dp . "<crlf>" . $pane . "<crlf>" . $p_i, "o", "utf8");'
+    ; $activePath 获取当前活动面板路径
+    ; $inactivePath 获取非活动面板路径 (如果启用双面板的话)
+    xyScript := '::$dp = get("#800"); $pane = get("pane"); $activePath = get("path", $pane); $inactivePath = ""; if ($dp == 1) { $inactivePath = get("path", ($pane == 1) ? 2 : 1); } writefile("' tempFile '", $dp . "<crlf>" . $pane . "<crlf>" . $activePath . "<crlf>" . $inactivePath, "o", "utf8");'
     
     if (!SendXYplorerScript(hwnd, xyScript)) {
         LogWarn("Failed to send WM_COPYDATA to XYplorer window " hwnd)
@@ -77,9 +78,9 @@ CollectPathsFromXYplorerInstance(hwnd) {
         if (lines.Length < 1 || lines[1] = "")
             return paths
 
-        activePath := NormalizePathString(lines[1])
-        isDualPane := (lines.Length >= 2 && lines[2] = "1")
-        activePaneIndex := (lines.Length >= 3 ? lines[3] : "1")
+        isDualPane := (lines[1] = "1")
+        activePaneIndex := (lines.Length >= 2 ? lines[2] : "1")
+        activePath := (lines.Length >= 3 ? NormalizePathString(lines[3]) : "")
         inactivePath := (lines.Length >= 4 ? NormalizePathString(lines[4]) : "")
         
         if (isDualPane && inactivePath) {
