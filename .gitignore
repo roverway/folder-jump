@@ -1,3 +1,5 @@
 .VSCodeCounter/*
 logs/*
 config.ini
+FolderJump.exe
+build/build.bat

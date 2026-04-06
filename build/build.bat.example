@@ -1,0 +1,42 @@
+@echo off
+setlocal enabledelayedexpansion
+
+REM FolderJump Build Script - ASCII Only to avoid encoding issues
+REM Path should be quoted to handle spaces
+
+set "SOURCE=..\main.ahk"
+set "OUTPUT=..\FolderJump.exe"
+set "ICON="
+
+REM Try Scoop Paths Directly (Provided by user context)
+set "AHK2EXE=PATH_TO_Ahk2Exe.exe"
+set "BASE_V2=PATH_TO_AutoHotkey64(V2).exe"
+
+echo Building FolderJump...
+echo Compiler: "%AHK2EXE%"
+echo Base V2:  "%BASE_V2%"
+
+if not exist "%AHK2EXE%" (
+    echo [ERROR] Ahk2Exe not found at %AHK2EXE%
+    pause
+    exit /b 1
+)
+
+REM Build command
+REM /in = source, /out = destination, /base = interpreter, /cp 65001 = UTF-8
+set CMD="%AHK2EXE%" /in "%SOURCE%" /out "%OUTPUT%" /cp 65001
+if exist "%BASE_V2%" set CMD=%CMD% /base "%BASE_V2%"
+
+echo Command: %CMD%
+%CMD%
+
+if %ERRORLEVEL% EQU 0 (
+    echo.
+    echo BUILD SUCCESS: %OUTPUT%
+) else (
+    echo.
+    echo BUILD FAILED!
+    exit /b 1
+)
+
+pause
