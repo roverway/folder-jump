@@ -86,23 +86,48 @@ BuildGroupedItems(pathCache, maxItems) {
     fullPaths     := []
     firstSelectable := 0
 
-    for src in groupOrder {
+    for groupIdx, src in groupOrder {
+        ; 方向A：在不同分组间插入空白分隔行增加呼吸感
+        if (groupIdx > 1) {
+            items.Push(" ")
+            selectableMap.Push(-1)
+            fullPaths.Push("")
+        }
+
         indices := groups[src]
         srcName := GetSourceDisplayName(src)
 
-        ; 插入分组标题行（格式: "  ── Windows Explorer (2)"）
-        header := "  ── " srcName " (" indices.Length ")"
+        ; 插入分组标题行（方向D：右侧数字通过中点对齐）
+        baseTxt := " ▸ " srcName " "
+        countTxt := " (" indices.Length ")"
+        
+        ; 估算填充长度，目标长度约75~80，因 Segoe UI 比例字体可能略有偏差
+        padCount := 75 - StrLen(baseTxt) - StrLen(countTxt)
+        if (padCount < 3)
+            padCount := 3
+        
+        padStr := ""
+        Loop padCount
+            padStr .= "·"
+
+        header := baseTxt padStr countTxt
         items.Push(header)
         selectableMap.Push(-1)
         fullPaths.Push("")
 
-        ; 插入各路径行（4 空格缩进，与标题行形成层级感）
-        for cacheIdx in indices {
+        ; 插入各路径行（方向A：树状结构模拟）
+        totalCount := indices.Length
+        for i, cacheIdx in indices {
             entry       := pathCache[cacheIdx]
-            displayPath := "    " TruncatePathForDisplay(entry.path, 55)
+            
+            ; 末尾项用 └─，中间项用 ├─
+            prefix := (i = totalCount) ? " └─  " : " ├─  "
+            
+            displayPath := prefix TruncatePathForDisplay(entry.path, 52)
             items.Push(displayPath)
             selectableMap.Push(cacheIdx)
             fullPaths.Push(entry.path)
+            
             ; 记录第一个可选行的位置
             if (firstSelectable = 0)
                 firstSelectable := items.Length
