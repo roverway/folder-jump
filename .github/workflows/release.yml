@@ -20,46 +20,73 @@ jobs:
       - name: Download AHK and Compiler
         shell: powershell
         run: |
-          New-Item -ItemType Directory -Path "_setup"
+          New-Item -ItemType Directory -Path "_setup" -Force | Out-Null
           
-          echo "Downloading AutoHotkey v2.0.18..."
-          Invoke-WebRequest -Uri "https://github.com/AutoHotkey/AutoHotkey/releases/download/v2.0.18/AutoHotkey_2.0.18.zip" -OutFile "_setup/ahk.zip"
+          Write-Host "Downloading AutoHotkey v2.0.23..."
+          Invoke-WebRequest -Uri "https://github.com/AutoHotkey/AutoHotkey/releases/download/v2.0.23/AutoHotkey_2.0.23.zip" -OutFile "_setup/ahk.zip" -ErrorAction Stop
           
-          echo "Downloading Ahk2Exe v1.1.37.02..."
-          Invoke-WebRequest -Uri "https://github.com/AutoHotkey/Ahk2Exe/releases/download/Ahk2Exe1.1.37.02/Ahk2Exe1.1.37.02.zip" -OutFile "_setup/a2e.zip"
+          Write-Host "Downloading Ahk2Exe v1.1.37.02a2..."
+          Invoke-WebRequest -Uri "https://github.com/AutoHotkey/Ahk2Exe/releases/download/Ahk2Exe1.1.37.02a2/Ahk2Exe1.1.37.02a2.zip" -OutFile "_setup/a2e.zip" -ErrorAction Stop
           
-          echo "Extracting packages..."
+          Write-Host "Extracting AutoHotkey..."
           Expand-Archive -Path "_setup/ahk.zip" -DestinationPath "_setup/ahk" -Force
+          
+          Write-Host "Extracting Ahk2Exe..."
           Expand-Archive -Path "_setup/a2e.zip" -DestinationPath "_setup/a2e" -Force
           
-          # List files for debugging if needed
-          # Get-ChildItem -Path "_setup" -Recurse
+          Write-Host "`n=== AutoHotkey 目录结构 ==="
+          Get-ChildItem -Path "_setup/ahk" -Recurse -File | Select-Object -ExpandProperty FullName | ForEach-Object { Write-Host $_ }
+          
+          Write-Host "`n=== Ahk2Exe 目录结构 ==="
+          Get-ChildItem -Path "_setup/a2e" -Recurse -File | Select-Object -ExpandProperty FullName | ForEach-Object { Write-Host $_ }
 
       - name: Compile FolderJump (AHK v2)
         shell: powershell
         run: |
-          # Define paths
-          $ahkBase = "_setup/ahk/v2/AutoHotkey64.exe"
-          $compiler = "_setup/a2e/Ahk2Exe.exe"
-          
-          # Verify paths
-          if (-not (Test-Path $ahkBase)) { 
-             $ahkBase = "_setup/ahk/AutoHotkey64.exe" # Fallback
+          # 查找 AutoHotkey64.exe
+          $ahkBase = Get-ChildItem -Path "_setup/ahk" -Name "AutoHotkey64.exe" -Recurse | Select-Object -First 1
+          if ($ahkBase) {
+              $ahkBase = Join-Path "_setup/ahk" $ahkBase
+          } else {
+              throw "Error: Could not find AutoHotkey64.exe in _setup/ahk"
           }
           
-          if (-not (Test-Path $ahkBase)) { throw "Error: Could not find AutoHotkey64.exe" }
-          if (-not (Test-Path $compiler)) { throw "Error: Could not find Ahk2Exe.exe" }
+          # 查找 Ahk2Exe.exe
+          $compiler = Get-ChildItem -Path "_setup/a2e" -Name "Ahk2Exe.exe" -Recurse | Select-Object -First 1
+          if ($compiler) {
+              $compiler = Join-Path "_setup/a2e" $compiler
+          } else {
+              throw "Error: Could not find Ahk2Exe.exe in _setup/a2e"
+          }
           
-          echo "Compiling main.ahk using base: $ahkBase"
+          Write-Host "Found AutoHotkey base: $ahkBase"
+          Write-Host "Found Ahk2Exe compiler: $compiler"
           
-          # Execute Ahk2Exe
-          # /in: source, /out: destination, /base: interpreter, /cp: UTF-8
-          & $compiler /in "main.ahk" /out "FolderJump.exe" /base "$ahkBase" /cp 65001
+          # 验证文件存在
+          if (-not (Test-Path $ahkBase)) { 
+              throw "Error: AutoHotkey64.exe not accessible at $ahkBase" 
+          }
+          if (-not (Test-Path $compiler)) { 
+              throw "Error: Ahk2Exe.exe not accessible at $compiler" 
+          }
+          
+          Write-Host "Compiling main.ahk..."
+          
+          # 编译命令 - 格式必须正确：/in /out /base /cp (不为/base参数添加前缀/$)
+          $cmd = @("/in", "main.ahk", "/out", "FolderJump.exe", "/base", $ahkBase, "/cp", "65001")
+          Write-Host "Command: $compiler $($cmd -join ' ')"
+          
+          & $compiler $cmd
+          
+          if ($LASTEXITCODE -ne 0) {
+              throw "Ahk2Exe failed with exit code $LASTEXITCODE"
+          }
           
           if (Test-Path "FolderJump.exe") {
-              echo "Build success: FolderJump.exe"
+              Write-Host "✓ Build success: FolderJump.exe created"
+              Get-Item "FolderJump.exe" | Select-Object FullName, Size
           } else {
-              throw "Build failed: FolderJump.exe not created."
+              throw "Build failed: FolderJump.exe not created"
           }
 
       - name: Create GitHub Release
