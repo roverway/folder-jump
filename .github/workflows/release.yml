@@ -43,49 +43,50 @@ jobs:
       - name: Compile FolderJump (AHK v2)
         shell: powershell
         run: |
-          # 查找 AutoHotkey64.exe
-          $ahkBase = Get-ChildItem -Path "_setup/ahk" -Name "AutoHotkey64.exe" -Recurse | Select-Object -First 1
-          if ($ahkBase) {
-              $ahkBase = Join-Path "_setup/ahk" $ahkBase
-          } else {
+          # Find AutoHotkey64.exe recursively
+          $ahkFiles = Get-ChildItem -Path "_setup/ahk" -Name "AutoHotkey64.exe" -Recurse -ErrorAction SilentlyContinue
+          if ($ahkFiles.Count -eq 0) {
               throw "Error: Could not find AutoHotkey64.exe in _setup/ahk"
           }
+          $ahkBase = Join-Path "_setup/ahk" $ahkFiles[0]
           
-          # 查找 Ahk2Exe.exe
-          $compiler = Get-ChildItem -Path "_setup/a2e" -Name "Ahk2Exe.exe" -Recurse | Select-Object -First 1
-          if ($compiler) {
-              $compiler = Join-Path "_setup/a2e" $compiler
-          } else {
+          # Find Ahk2Exe.exe recursively
+          $exeFiles = Get-ChildItem -Path "_setup/a2e" -Name "Ahk2Exe.exe" -Recurse -ErrorAction SilentlyContinue
+          if ($exeFiles.Count -eq 0) {
               throw "Error: Could not find Ahk2Exe.exe in _setup/a2e"
           }
+          $compiler = Join-Path "_setup/a2e" $exeFiles[0]
           
           Write-Host "Found AutoHotkey base: $ahkBase"
           Write-Host "Found Ahk2Exe compiler: $compiler"
           
-          # 验证文件存在
-          if (-not (Test-Path $ahkBase)) { 
-              throw "Error: AutoHotkey64.exe not accessible at $ahkBase" 
+          # Verify files exist
+          if (-not (Test-Path $ahkBase)) {
+              throw "Error: AutoHotkey64.exe not accessible at $ahkBase"
           }
-          if (-not (Test-Path $compiler)) { 
-              throw "Error: Ahk2Exe.exe not accessible at $compiler" 
+          if (-not (Test-Path $compiler)) {
+              throw "Error: Ahk2Exe.exe not accessible at $compiler"
           }
           
           Write-Host "Compiling main.ahk..."
           
-          # 编译命令 - 格式必须正确：/in /out /base /cp (不为/base参数添加前缀/$)
-          $cmd = @("/in", "main.ahk", "/out", "FolderJump.exe", "/base", $ahkBase, "/cp", "65001")
-          Write-Host "Command: $compiler $($cmd -join ' ')"
+          # Build compilation command
+          $args = "/in", "main.ahk", "/out", "FolderJump.exe", "/base", $ahkBase, "/cp", "65001"
+          Write-Host "Running: $compiler $args"
           
-          & $compiler $cmd
+          # Execute compiler
+          & $compiler $args
           
           if ($LASTEXITCODE -ne 0) {
               throw "Ahk2Exe failed with exit code $LASTEXITCODE"
           }
           
+          # Verify output
           if (Test-Path "FolderJump.exe") {
-              Write-Host "✓ Build success: FolderJump.exe created"
-              Get-Item "FolderJump.exe" | Select-Object FullName, Size
-          } else {
+              Write-Host "Build success: FolderJump.exe created"
+              Get-Item "FolderJump.exe" | Select-Object FullName, Length
+          }
+          else {
               throw "Build failed: FolderJump.exe not created"
           }
 
