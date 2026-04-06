@@ -19,10 +19,11 @@ CollectTotalCmdPaths() {
 
         for hwnd in tcWindows {
             try {
-                panelPaths := GetTCPathsViaWM_COPYDATA(hwnd)
+                expectedPanelCount := 0
+                panelPaths := GetTCPathsViaWM_COPYDATA(hwnd, &expectedPanelCount)
                 
-                ; 无论 API 获取到多少个，如果没找全，再用 WinGetText 兜底补充
-                if (panelPaths.Length < 2) {
+                ; 无论 API 获取到多少个，如果没达标可视面板数量，再用 WinGetText 兜底补充
+                if (panelPaths.Length < expectedPanelCount) {
                     fallbackPaths := GetTCPathsViaWinGetText(hwnd)
                     for fp in fallbackPaths {
                         hasMatched := false
@@ -70,9 +71,10 @@ CollectTotalCmdPaths() {
     return paths
 }
 
-GetTCPathsViaWM_COPYDATA(hwnd) {
+GetTCPathsViaWM_COPYDATA(hwnd, &expectedCount) {
     global g_TC_WMCOPYDATA_Result
     paths := []
+    expectedCount := 0
 
     try {
         ; 注册监听，仅在接收时用
@@ -92,18 +94,26 @@ GetTCPathsViaWM_COPYDATA(hwnd) {
             g_TC_WMCOPYDATA_Result
         )
 
+        leftVisible := IsTCPanelVisible(hwnd, 9)
+        rightVisible := IsTCPanelVisible(hwnd, 10)
+        
+        if (leftVisible)
+            expectedCount++
+        if (rightVisible)
+            expectedCount++
+
         ; LP=左面板, RP=右面板, SP=活动面板
         leftPath := NormalizeTCPathText(QueryTC("LP"))
         rightPath := NormalizeTCPathText(QueryTC("RP"))
         activePath := NormalizeTCPathText(QueryTC("SP"))
 
-        LogDebug("TC Left Path: " leftPath)
-        LogDebug("TC Right Path: " rightPath)
+        LogDebug("TC Left Path: " leftPath " (Visible: " leftVisible ")")
+        LogDebug("TC Right Path: " rightPath " (Visible: " rightVisible ")")
         LogDebug("TC Active Path: " activePath)
 
         added := Map()
         
-        if (leftPath && RegExMatch(leftPath, "^[A-Za-z]:") && !added.Has(leftPath)) {
+        if (leftVisible && leftPath && RegExMatch(leftPath, "^[A-Za-z]:") && !added.Has(leftPath)) {
             paths.Push({
                 path: leftPath,
                 panelRole: (leftPath == activePath) ? "active" : "inactive",
@@ -112,7 +122,7 @@ GetTCPathsViaWM_COPYDATA(hwnd) {
             added[leftPath] := true
         }
 
-        if (rightPath && RegExMatch(rightPath, "^[A-Za-z]:") && !added.Has(rightPath)) {
+        if (rightVisible && rightPath && RegExMatch(rightPath, "^[A-Za-z]:") && !added.Has(rightPath)) {
             paths.Push({
                 path: rightPath,
                 panelRole: (rightPath == activePath) ? "active" : "inactive",
@@ -126,6 +136,23 @@ GetTCPathsViaWM_COPYDATA(hwnd) {
     }
 
     return paths
+}
+
+IsTCPanelVisible(tcHwnd, pathWparam) {
+    try {
+        ctrlHwnd := SendMessage(1074, pathWparam, , , "ahk_id " tcHwnd)
+        if (ctrlHwnd && ctrlHwnd > 0) {
+            if (ControlGetVisible(ctrlHwnd)) {
+                ControlGetPos(, , &w, , ctrlHwnd)
+                if (IsSet(w) && w > 0) {
+                    return true
+                }
+            }
+        }
+    } catch {
+        ; 忽略可能的句柄无效等错误
+    }
+    return false
 }
 
 ReceiveTC_WM_COPYDATA(wParam, lParam, msg, hwnd) {
