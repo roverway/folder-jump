@@ -1,6 +1,6 @@
 ; ============================================================
 ; Selection UI — FolderJump
-; 浮动菜单 GUI（键盘导航、自动关闭）
+; 浮动菜单 GUI（键盘导航、自动关闭、按来源分组显示）
 ; ============================================================
 
 #Include "%A_ScriptDir%\lib\log_manager.ahk"
@@ -22,40 +22,104 @@ g_Themes := {
     }
 }
 
+; 来源名称映射（source 字符串 → 用户可读的文件管理器完整名称）
+GetSourceDisplayName(source) {
+    names := Map(
+        "explorer", "Windows Explorer",
+        "totalcmd", "Total Commander",
+        "dopus",    "Directory Opus",
+        "xyplorer", "XYplorer"
+    )
+    return names.Has(source) ? names[source] : source
+}
+
 ; 智能截断长路径
 ; 参数:
-;   fullPath - 完整路径
-;   maxLength - 显示的最大字符数（默认 60）
+;   fullPath  - 完整路径
+;   maxLength - 显示的最大字符数（默认 55）
 ; 返回:
 ;   截断后的路径（保留末尾文件夹和开头部分）
-TruncatePathForDisplay(fullPath, maxLength := 60) {
+TruncatePathForDisplay(fullPath, maxLength := 55) {
     if (StrLen(fullPath) <= maxLength)
         return fullPath
-    
+
     ; 获取末尾文件夹名称
     lastBackslash := InStr(fullPath, "\", , 0)
     folderName := SubStr(fullPath, lastBackslash + 1)
-    
+
     ; 如果末尾文件夹本身已经接近最大长度，直接返回
     if (StrLen(folderName) >= maxLength - 5)
         return "..." folderName
-    
+
     ; 计算剩余空间用于显示开头路径
     remainingLength := maxLength - StrLen(folderName) - 4  ; 4 是"..."的长度
     prefixPath := SubStr(fullPath, 1, remainingLength)
-    
+
     return prefixPath "..." folderName
+}
+
+; 按来源分组，构建供 ListBox 显示的并行数组集合
+; 返回:
+;   result.items[]         — ListBox 显示字符串（含分组标题行和路径行）
+;   result.selectableMap[] — 与 items 等长；分组标题行值为 -1，路径行值为 g_PathCache 中的 1-based 索引
+;   result.fullPaths[]     — 与 items 等长；分组标题行值为 ""，路径行值为完整路径
+;   result.firstSelectable — 第一个可选路径行在 items 中的 1-based 索引
+BuildGroupedItems(pathCache, maxItems) {
+    ; 按首次出现顺序收集各来源分组
+    groups     := Map()   ; source → 该来源在 pathCache 中的索引数组
+    groupOrder := []      ; 来源首次出现顺序
+
+    count := Min(pathCache.Length, maxItems)
+    Loop count {
+        entry := pathCache[A_Index]
+        src   := entry.source
+        if (!groups.Has(src)) {
+            groups[src] := []
+            groupOrder.Push(src)
+        }
+        groups[src].Push(A_Index)
+    }
+
+    ; 构建并行数组
+    items         := []
+    selectableMap := []
+    fullPaths     := []
+    firstSelectable := 0
+
+    for src in groupOrder {
+        indices := groups[src]
+        srcName := GetSourceDisplayName(src)
+
+        ; 插入分组标题行（格式: "  ── Windows Explorer (2)"）
+        header := "  ── " srcName " (" indices.Length ")"
+        items.Push(header)
+        selectableMap.Push(-1)
+        fullPaths.Push("")
+
+        ; 插入各路径行（4 空格缩进，与标题行形成层级感）
+        for cacheIdx in indices {
+            entry       := pathCache[cacheIdx]
+            displayPath := "    " TruncatePathForDisplay(entry.path, 55)
+            items.Push(displayPath)
+            selectableMap.Push(cacheIdx)
+            fullPaths.Push(entry.path)
+            ; 记录第一个可选行的位置
+            if (firstSelectable = 0)
+                firstSelectable := items.Length
+        }
+    }
+
+    return {items: items, selectableMap: selectableMap, fullPaths: fullPaths, firstSelectable: firstSelectable}
 }
 
 ; 显示路径选择器
 ; 参数:
-;   context - 当前窗口类型（"explorer", "dialog", "totalcmd", "dopus"）
+;   context    - 当前窗口类型（"explorer", "dialog", "totalcmd", "dopus", "xyplorer"）
 ;   activeHwnd - 前景窗口句柄，用于定位弹出位置
 ; 行为:
-;   创建浮动 ListBox 菜单，显示所有已打开的文件夹路径
-;   支持键盘导航（↑↓选择、Enter确认、Esc取消）
-;   自动关闭（失焦、超时）
-;   用户选择后调用 ExecutePathSwitch 执行跳转
+;   创建 500px 宽的浮动 ListBox 菜单，按来源分组显示所有已打开的文件夹路径
+;   支持键盘导航（↑↓ 选择并自动跳过分组标题行、Enter 确认、Esc 取消）
+;   自动关闭（失焦、超时）；用户选择后调用 ExecutePathSwitch 执行跳转
 ShowPathSelector(context, activeHwnd) {
     global g_PathCache, g_Config, g_CurrentGui
 
@@ -76,10 +140,10 @@ ShowPathSelector(context, activeHwnd) {
     try {
         WinGetPos(&wx, &wy, &ww, &wh, "ahk_id " activeHwnd)
     } catch {
-        ; 如果获取失败，使用屏幕中心
-        wx := A_ScreenWidth // 2 - 200
+        ; 获取失败时使用屏幕中心
+        wx := A_ScreenWidth  // 2 - 250
         wy := A_ScreenHeight // 2 - 150
-        ww := 400
+        ww := 500
         wh := 300
     }
 
@@ -87,83 +151,79 @@ ShowPathSelector(context, activeHwnd) {
     themeName := g_Config.theme
     theme := g_Themes.HasOwnProp(themeName) ? g_Themes.%themeName% : g_Themes.dark
 
-    ; 创建 GUI
+    ; 创建 GUI（固定宽度 500px）
     pathGui := Gui("+AlwaysOnTop +ToolWindow -Caption +Border")
     pathGui.BackColor := theme.bg
+    pathGui.SetFont("s11 q5", "Segoe UI")  ; 11pt，ClearType 渲染，可读性最佳
 
     ; 标题栏
     titleColor := theme.text
-    pathGui.Add("Text", "x5 y5 w390 Center c" titleColor, "FolderJump - 选择目标文件夹")
+    pathGui.Add("Text", "x5 y5 w490 Center c" titleColor, "FolderJump - 选择目标文件夹")
 
-    ; 构建列表项（使用截断路径）
-    ; 保存原始路径数据供后续使用
-    items := []
-    displayPaths := []
-    maxItems := g_Config.max_items
-    count := Min(g_PathCache.Length, maxItems)
-    Loop count {
-        entry := g_PathCache[A_Index]
-        ; 截断路径用于显示（最多60字符）
-        displayPath := TruncatePathForDisplay(entry.path, 60)
-        if (g_Config.show_source_label)
-            displayPath := displayPath "  [" entry.label "]"
-        items.Push(displayPath)
-        displayPaths.Push(entry.path)  ; 保存完整路径
-    }
+    ; 按来源分组构建显示列表（含分组标题行）
+    grouped         := BuildGroupedItems(g_PathCache, g_Config.max_items)
+    items           := grouped.items
+    selectableMap   := grouped.selectableMap
+    fullPaths       := grouped.fullPaths
+    firstSelectable := grouped.firstSelectable
 
-    ; 获取 DPI 缩放因子
-    ; A_Dpi 变量在 AHK v2 中反映系统 DPI 设置（通常 100%, 125%, 150% 等）
-    ; 如果未定义或低于 100，使用默认值 100
-    dpiScale := IsSet(A_ScreenDPI) ? (A_ScreenDPI / 96) : 1
-    
-    ; 计算每项高度（基于 DPI）
-    itemHeight := Round(25 * dpiScale)
-    maxListHeight := Round(300 * dpiScale)
-    previewHeight := Round(50 * dpiScale)  ; 底部预览区域高度
-    headerHeight := Round(80 * dpiScale)  ; 标题 + 提示高度
+    ; 根据 DPI 计算每行高度，11pt 字体约 27px
+    dpiScale      := IsSet(A_ScreenDPI) ? (A_ScreenDPI / 96) : 1
+    itemHeight    := Round(27 * dpiScale)
+    maxListHeight := Round(400 * dpiScale)
 
-    ; 路径列表（ListBox）
-    listHeight := Min(count * itemHeight, maxListHeight)
-    listBox := pathGui.Add("ListBox", "x5 y30 w390 h" listHeight " vPathList", items)
-    listBox.Choose(1)
+    ; 路径列表
+    listHeight := Min(items.Length * itemHeight, maxListHeight)
+    listBox := pathGui.Add("ListBox", "x5 y30 w490 h" listHeight " vPathList", items)
 
-    ; 完整路径预览区域
-    textColor := theme.text
-    previewBox := pathGui.Add("Text", "x5 y+" 5 " w390 h30 c" textColor, displayPaths[1])
-    previewBox.Value := displayPaths[1]
+    ; 选中第一个可选路径行（跳过最开头的分组标题行）
+    if (firstSelectable > 0)
+        listBox.Choose(firstSelectable)
 
-    ; 底部提示
+    ; 完整路径预览区域（显示当前选中行的未截断路径）
+    textColor   := theme.text
+    initPreview := (firstSelectable > 0) ? fullPaths[firstSelectable] : ""
+    previewBox  := pathGui.Add("Text", "x5 y+" 5 " w490 h20 c" textColor, initPreview)
+    previewBox.Value := initPreview
+
+    ; 底部操作提示
     hintColor := theme.hint
-    pathGui.Add("Text", "x5 y+" 3 " w390 Center c" hintColor, "↑↓ 选择  |  Enter 确认  |  Esc 取消")
+    pathGui.Add("Text", "x5 y+" 3 " w490 Center c" hintColor, "↑↓ 选择  |  Enter 确认  |  Esc 取消")
 
-    ; 计算弹出位置
-    popupX := wx
-    popupY := wy + wh + 5
+    ; 计算弹出位置（优先紧贴活动窗口正下方）
+    popupX      := wx
+    popupY      := wy + wh + 5
+    totalHeight := listHeight + 80 + 6  ; 列表 + 标题 + 预览 + 提示 + 间距
 
-    ; 确保不超出屏幕底部
-    ; totalHeight 需要包含：标题 + listBox + 预览区 + 提示 + 间距
-    totalHeight := listHeight + headerHeight + 30 + 6
+    ; 防止超出屏幕底部
     if (popupY + totalHeight > A_ScreenHeight) {
         popupY := wy - totalHeight - 10
         if (popupY < 0)
             popupY := 10
     }
+    ; 防止超出屏幕右侧
+    if (popupX + 500 > A_ScreenWidth)
+        popupX := A_ScreenWidth - 510
 
     ; 显示窗口
     pathGui.Show("x" popupX " y" popupY)
 
-    ; 保存 GUI 引用和原始活动窗口句柄（用于后续跳转）
-    ; 同时保存完整路径列表用于预览
-    g_CurrentGui := pathGui
-    pathGui.targetHwnd := activeHwnd
-    pathGui.displayPaths := displayPaths
-    pathGui.previewBox := previewBox
+    ; 保存 GUI 引用和辅助数据（供事件处理函数使用）
+    g_CurrentGui              := pathGui
+    pathGui.targetHwnd        := activeHwnd
+    pathGui.selectableMap     := selectableMap
+    pathGui.fullPaths         := fullPaths
+    pathGui.previewBox        := previewBox
+    pathGui.lastValidIndex    := firstSelectable  ; 最近一次落在可选行的 displayItems 索引
+    pathGui.selectedIndex     := firstSelectable
 
-    ; 绑定键盘事件
+    ; 绑定事件
     pathGui.OnEvent("Escape", GuiEscape)
+    listBox.OnEvent("DoubleClick", ListBoxConfirm)
+    listBox.OnEvent("Change", ListBoxChange)
 
     ; 超时自动关闭
-    timeout := g_Config.auto_close_timeout * 1000
+    timeout     := g_Config.auto_close_timeout * 1000
     autoCloseFn := GuiAutoClose.Bind(pathGui)
     SetTimer(autoCloseFn, -timeout)
     pathGui.autoCloseTimer := autoCloseFn
@@ -173,80 +233,103 @@ ShowPathSelector(context, activeHwnd) {
     SetTimer(focusCheckFn, 200)
     pathGui.focusCheckTimer := focusCheckFn
 
-    ; 设置 ListBox 键盘事件
-    listBox.OnEvent("DoubleClick", ListBoxConfirm)
-    listBox.OnEvent("Change", ListBoxChange)
-
-    ; 使用 AHK v2 的 InputHook 捕获 Enter 键
+    ; 使用 InputHook 捕获 Enter 键，防止原始按键泄漏到目标窗口
     enterHook := InputHook("V")
-    enterHook.KeyOpt("{Enter}", "NS") ; 'N' Notify, 'S' Suppress 以拦截原始按键
+    enterHook.KeyOpt("{Enter}", "NS")  ; N=Notify, S=Suppress
     enterHook.OnKeyDown := ListBoxEnterPressed.Bind(listBox)
     enterHook.Start()
-
-    ; 保存引用以便清理
     pathGui.enterHook := enterHook
-    pathGui.selectedIndex := 0
 }
 
 ; ListBox 确认事件（双击时触发）
-; 执行路径跳转并关闭 GUI
+; 通过 selectableMap 还原真实 g_PathCache 索引，支持分组标题行存在时的正确跳转
 ListBoxConfirm(GuiCtrlObj, *) {
     global g_CurrentGui, g_PathCache
     selectedIndex := GuiCtrlObj.Value
-    if (selectedIndex > 0 && selectedIndex <= g_PathCache.Length) {
-        entry := g_PathCache[selectedIndex]
-        LogInfo("用户选择路径(双击): " entry.path " [" entry.label "]")
-        ; 使用保存的目标窗口句柄，而不是当前活动窗口（因为当前是 FolderJump GUI）
-        targetHwnd := g_CurrentGui.HasOwnProp("targetHwnd") ? g_CurrentGui.targetHwnd : 0
-        
-        ; 提前清理 GUI，恢复目标窗口焦点
-        CleanupGui(g_CurrentGui)
-        ExecutePathSwitch(entry, targetHwnd)
-    } else {
-        CleanupGui(g_CurrentGui)
+    if (selectedIndex > 0 && g_CurrentGui.HasOwnProp("selectableMap")) {
+        cacheIdx := g_CurrentGui.selectableMap[selectedIndex]
+        ; 分组标题行的 cacheIdx 为 -1，需跳过
+        if (cacheIdx > 0 && cacheIdx <= g_PathCache.Length) {
+            entry      := g_PathCache[cacheIdx]
+            targetHwnd := g_CurrentGui.HasOwnProp("targetHwnd") ? g_CurrentGui.targetHwnd : 0
+            LogInfo("用户选择路径(双击): " entry.path " [" entry.label "]")
+            CleanupGui(g_CurrentGui)
+            ExecutePathSwitch(entry, targetHwnd)
+            return
+        }
     }
+    CleanupGui(g_CurrentGui)
 }
 
-; ListBox 变更事件（用于键盘导航时记录当前选择）
-; 保存当前选择到 GUI 对象以便 Enter 键处理，同时更新底部预览
+; ListBox 变更事件（键盘 ↑↓ 导航时触发）
+; 自动跳过分组标题行，同时更新底部完整路径预览
 ListBoxChange(GuiCtrlObj, *) {
     global g_CurrentGui
-    if (IsSet(g_CurrentGui) && g_CurrentGui) {
-        selectedIndex := GuiCtrlObj.Value
-        g_CurrentGui.selectedIndex := selectedIndex
-        
-        ; 更新底部完整路径预览
-        if (selectedIndex > 0 && 
-            g_CurrentGui.HasOwnProp("displayPaths") && 
-            selectedIndex <= g_CurrentGui.displayPaths.Length &&
-            g_CurrentGui.HasOwnProp("previewBox")) {
-            ; 显示完整路径
-            fullPath := g_CurrentGui.displayPaths[selectedIndex]
-            g_CurrentGui.previewBox.Value := fullPath
+    if (!IsSet(g_CurrentGui) || !g_CurrentGui)
+        return
+
+    selectedIndex := GuiCtrlObj.Value
+    if (selectedIndex <= 0)
+        return
+
+    selectableMap := g_CurrentGui.selectableMap
+
+    ; 当前选中的是分组标题行（selectableMap 值为 -1），需要自动跳转到相邻的可选行
+    if (selectableMap[selectedIndex] = -1) {
+        lastValid := g_CurrentGui.lastValidIndex
+
+        if (selectedIndex > lastValid) {
+            ; 用户向下移动：找当前位置之后最近的可选行
+            nextIdx := selectedIndex + 1
+            while (nextIdx <= selectableMap.Length && selectableMap[nextIdx] = -1)
+                nextIdx++
+            GuiCtrlObj.Choose(nextIdx <= selectableMap.Length ? nextIdx : lastValid)
+        } else {
+            ; 用户向上移动：找当前位置之前最近的可选行
+            prevIdx := selectedIndex - 1
+            while (prevIdx >= 1 && selectableMap[prevIdx] = -1)
+                prevIdx--
+            GuiCtrlObj.Choose(prevIdx >= 1 ? prevIdx : lastValid)
         }
+        return  ; Choose() 会再次触发 Change 事件，由下方正常逻辑处理
+    }
+
+    ; 正常可选行：更新状态和底部完整路径预览
+    g_CurrentGui.lastValidIndex := selectedIndex
+    g_CurrentGui.selectedIndex  := selectedIndex
+
+    if (g_CurrentGui.HasOwnProp("fullPaths") &&
+        g_CurrentGui.HasOwnProp("previewBox") &&
+        selectedIndex <= g_CurrentGui.fullPaths.Length) {
+        fullPath := g_CurrentGui.fullPaths[selectedIndex]
+        if (fullPath != "")
+            g_CurrentGui.previewBox.Value := fullPath
     }
 }
 
 ; Enter 键确认（通过 InputHook 捕获）
-; 执行路径跳转并关闭 GUI
+; 通过 selectableMap 还原真实 g_PathCache 索引，执行路径跳转并关闭 GUI
 ListBoxEnterPressed(listBox, hook, vk, sc, *) {
     global g_CurrentGui, g_PathCache
     if (vk = 13) {
         try {
             selectedIndex := listBox.Value
-            if (selectedIndex > 0 && selectedIndex <= g_PathCache.Length) {
-                entry := g_PathCache[selectedIndex]
-                LogInfo("用户选择路径(Enter): " entry.path " [" entry.label "]")
-                ; 使用保存的目标窗口句柄，而不是当前活动窗口（因为当前是 FolderJump GUI）
-                targetHwnd := g_CurrentGui.HasOwnProp("targetHwnd") ? g_CurrentGui.targetHwnd : 0
-                
-                ; 先清理 GUI 释放 InputHook 和恢复焦点
-                CleanupGui(g_CurrentGui)
-                
-                ; 等待用户松开回车键，彻底杜绝回车残留事件导致目标对话框关闭
-                KeyWait("Enter")
-                
-                ExecutePathSwitch(entry, targetHwnd)
+            if (selectedIndex > 0 && g_CurrentGui.HasOwnProp("selectableMap")) {
+                cacheIdx := g_CurrentGui.selectableMap[selectedIndex]
+                ; 分组标题行的 cacheIdx 为 -1，需跳过
+                if (cacheIdx > 0 && cacheIdx <= g_PathCache.Length) {
+                    entry      := g_PathCache[cacheIdx]
+                    targetHwnd := g_CurrentGui.HasOwnProp("targetHwnd") ? g_CurrentGui.targetHwnd : 0
+                    LogInfo("用户选择路径(Enter): " entry.path " [" entry.label "]")
+
+                    ; 先清理 GUI，释放 InputHook 并恢复目标窗口焦点
+                    CleanupGui(g_CurrentGui)
+
+                    ; 等待用户松开 Enter，杜绝回车残留事件导致目标对话框关闭
+                    KeyWait("Enter")
+
+                    ExecutePathSwitch(entry, targetHwnd)
+                }
             }
         }
     }
@@ -259,7 +342,7 @@ GuiEscape(*) {
     CleanupGui(g_CurrentGui)
 }
 
-; 失焦检测定时器回调
+; 失焦检测定时器回调（每 200ms 触发一次）
 CheckFocusClose(pathGui) {
     global g_CurrentGui
     try {
@@ -268,7 +351,7 @@ CheckFocusClose(pathGui) {
             SetTimer(pathGui.focusCheckTimer, 0)
             return
         }
-        ; 检查 GUI 是否失去焦点（不是活动窗口）
+        ; 检查 GUI 是否失去焦点（不是当前活动窗口）
         if (WinActive("ahk_id " pathGui.Hwnd) != pathGui.Hwnd) {
             LogDebug("GUI 失焦，自动关闭")
             SetTimer(pathGui.focusCheckTimer, 0)
