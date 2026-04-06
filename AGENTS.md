@@ -1,4 +1,4 @@
-﻿# AGENTS.md — FolderJump
+# AGENTS.md — FolderJump
 
 > AutoHotkey v2 Windows 路径切换工具。复刻 Listary 的 Ctrl+G 功能。
 
@@ -45,7 +45,8 @@ folder-jump/
 ├── adapters/
 │   ├── explorer.ahk            # Windows Explorer COM 适配器（#Include log_manager, utils）
 │   ├── totalcmd.ahk            # Total Commander 双面板适配器（#Include log_manager, utils）
-│   └── dopus.ahk               # Directory Opus 多标签适配器（#Include log_manager, utils）
+│   ├── dopus.ahk               # Directory Opus 多标签适配器（#Include log_manager, utils）
+│   └── xyplorer.ahk            # XYplorer 适配器（#Include log_manager, utils）
 ├── build/
 │   └── build.bat               # Ahk2Exe 编译脚本
 └── logs/
@@ -67,6 +68,7 @@ main.ahk
       → adapters/explorer（→ log_manager, utils）
       → adapters/totalcmd（→ log_manager, utils）
       → adapters/dopus（→ log_manager, utils）
+      → adapters/xyplorer（→ log_manager, utils）
 ```
 
 **规则**：`main.ahk` 按依赖顺序 #Include 模块。每个模块 #Include 自己的依赖。禁止添加循环 include。
@@ -163,7 +165,7 @@ SomeFunction() {
 ```autohotkey
 {
     path: string,        ; 完整文件系统路径
-    source: string,     ; "explorer" | "totalcmd" | "dopus"
+    source: string,     ; "explorer" | "totalcmd" | "dopus" | "xyplorer"
     label: string,      ; 显示标签，例如 "Explorer", "TC (左)"
     hwnd: integer,      ; 窗口句柄（不可用时为 0）
     panel: string,      ; "left" | "right"（仅 TC，可选）

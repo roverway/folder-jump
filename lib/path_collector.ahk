@@ -7,12 +7,13 @@
 #Include "%A_ScriptDir%\adapters\explorer.ahk"
 #Include "%A_ScriptDir%\adapters\totalcmd.ahk"
 #Include "%A_ScriptDir%\adapters\dopus.ahk"
+#Include "%A_ScriptDir%\adapters\xyplorer.ahk"
 
 CollectAllPaths() {
     global g_Config
     allPaths := []
 
-    LogInfo("Adapter state - Explorer: " g_Config.enable_explorer ", TC: " g_Config.enable_totalcmd ", DOpus: " g_Config.enable_dopus)
+    LogInfo("Adapter state - Explorer: " g_Config.enable_explorer ", TC: " g_Config.enable_totalcmd ", DOpus: " g_Config.enable_dopus ", XY: " g_Config.enable_xyplorer)
 
     if (g_Config.enable_explorer) {
         LogInfo("Start collecting Explorer paths")
@@ -35,6 +36,13 @@ CollectAllPaths() {
         LogInfo("Start collecting Directory Opus paths")
         dopusPaths := CollectDOpusPaths()
         for pathEntry in dopusPaths
+            allPaths.Push(pathEntry)
+    }
+
+    if (g_Config.enable_xyplorer) {
+        LogInfo("Start collecting XYplorer paths")
+        xyPaths := CollectXYplorerPaths()
+        for pathEntry in xyPaths
             allPaths.Push(pathEntry)
     }
 

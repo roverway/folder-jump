@@ -20,6 +20,8 @@ enable_explorer=1
 enable_totalcmd=1
 ; 启用 Directory Opus 支持
 enable_dopus=1
+; 启用 XYplorer 支持
+enable_xyplorer=1
 
 [ui]
 ; 显示来源标签（如 "Explorer"、"TC (active)"）

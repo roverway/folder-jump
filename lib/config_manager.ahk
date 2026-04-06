@@ -1,4 +1,4 @@
-﻿; ============================================================
+; ============================================================
 ; 配置管理模块 - FolderJump
 ; 负责读取与重载 INI 配置
 ; ============================================================
@@ -17,6 +17,7 @@ LoadConfig() {
         enable_explorer: IniRead(configPath, "adapters", "enable_explorer", 1),
         enable_totalcmd: IniRead(configPath, "adapters", "enable_totalcmd", 1),
         enable_dopus: IniRead(configPath, "adapters", "enable_dopus", 1),
+        enable_xyplorer: IniRead(configPath, "adapters", "enable_xyplorer", 1),
         show_source_label: IniRead(configPath, "ui", "show_source_label", 1),
         max_items: IniRead(configPath, "ui", "max_items", 12),
         sort_by: IniRead(configPath, "ui", "sort_by", "recent"),
@@ -32,6 +33,7 @@ LoadConfig() {
     cfg.enable_explorer := Integer(cfg.enable_explorer)
     cfg.enable_totalcmd := Integer(cfg.enable_totalcmd)
     cfg.enable_dopus := Integer(cfg.enable_dopus)
+    cfg.enable_xyplorer := Integer(cfg.enable_xyplorer)
     cfg.show_source_label := Integer(cfg.show_source_label)
     cfg.max_items := Integer(cfg.max_items)
     cfg.log_max_size := Integer(cfg.log_max_size)

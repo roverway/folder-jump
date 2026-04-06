@@ -8,6 +8,7 @@
 #Include "%A_ScriptDir%\adapters\explorer.ahk"
 #Include "%A_ScriptDir%\adapters\totalcmd.ahk"
 #Include "%A_ScriptDir%\adapters\dopus.ahk"
+#Include "%A_ScriptDir%\adapters\xyplorer.ahk"
 
 ExecutePathSwitch(entry, targetHwnd := 0) {
     if (!targetHwnd)
