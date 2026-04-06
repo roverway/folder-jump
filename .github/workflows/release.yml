@@ -69,22 +69,25 @@ jobs:
           }
           
           Write-Host "Compiling main.ahk..."
+          Write-Host "Current location: $(Get-Location)"
           
-          # Build compilation command
-          $args = @("/in", "main.ahk", "/out", "FolderJump.exe", "/base", $ahkBase, "/cp", "65001")
+          # Build absolute output path to avoid relative path ambiguity
+          $outputPath = Join-Path (Get-Location) "FolderJump.exe"
+          $args = @("/in", "main.ahk", "/out", $outputPath, "/base", $ahkBase, "/cp", "65001")
           Write-Host "Running: $compiler $($args -join ' ')"
           
           # Execute compiler
           & $compiler $args
           
           # Verify output exists (don't rely on $LASTEXITCODE which may be unreliable)
-          Start-Sleep -Milliseconds 500  # Give file system time to sync
-          if (-not (Test-Path "FolderJump.exe")) {
-              throw "Build failed: FolderJump.exe was not created"
+          Start-Sleep -Milliseconds 1000  # Give file system time to sync
+          Get-ChildItem -Path $outputPath -Force -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "Found output: $($_.FullName) ($($_.Length) bytes)" }
+          if (-not (Test-Path $outputPath)) {
+              throw "Build failed: FolderJump.exe was not created at $outputPath"
           }
           
-          $exeInfo = Get-Item "FolderJump.exe"
-          Write-Host "Build success: FolderJump.exe created ($($exeInfo.Length) bytes)"
+          $exeInfo = Get-Item $outputPath
+          Write-Host "Build success: FolderJump.exe created ($($exeInfo.Length) bytes) at $outputPath"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
