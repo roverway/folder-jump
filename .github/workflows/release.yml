@@ -17,13 +17,50 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Compile FolderJump with Ahk2Exe
-        uses: tamo/action-Ahk2Exe@main
-        with:
-          src: main.ahk
-          taghead: v2
-          base: AutoHotkey64.exe
-          opt: /out FolderJump.exe /cp 65001
+      - name: Download AHK and Compiler
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Path "_setup"
+          
+          echo "Downloading AutoHotkey v2.0.18..."
+          Invoke-WebRequest -Uri "https://github.com/AutoHotkey/AutoHotkey/releases/download/v2.0.18/AutoHotkey_2.0.18.zip" -OutFile "_setup/ahk.zip"
+          
+          echo "Downloading Ahk2Exe v1.1.37.02..."
+          Invoke-WebRequest -Uri "https://github.com/AutoHotkey/Ahk2Exe/releases/download/Ahk2Exe1.1.37.02/Ahk2Exe1.1.37.02.zip" -OutFile "_setup/a2e.zip"
+          
+          echo "Extracting packages..."
+          Expand-Archive -Path "_setup/ahk.zip" -DestinationPath "_setup/ahk" -Force
+          Expand-Archive -Path "_setup/a2e.zip" -DestinationPath "_setup/a2e" -Force
+          
+          # List files for debugging if needed
+          # Get-ChildItem -Path "_setup" -Recurse
+
+      - name: Compile FolderJump (AHK v2)
+        shell: powershell
+        run: |
+          # Define paths
+          $ahkBase = "_setup/ahk/v2/AutoHotkey64.exe"
+          $compiler = "_setup/a2e/Ahk2Exe.exe"
+          
+          # Verify paths
+          if (-not (Test-Path $ahkBase)) { 
+             $ahkBase = "_setup/ahk/AutoHotkey64.exe" # Fallback
+          }
+          
+          if (-not (Test-Path $ahkBase)) { throw "Error: Could not find AutoHotkey64.exe" }
+          if (-not (Test-Path $compiler)) { throw "Error: Could not find Ahk2Exe.exe" }
+          
+          echo "Compiling main.ahk using base: $ahkBase"
+          
+          # Execute Ahk2Exe
+          # /in: source, /out: destination, /base: interpreter, /cp: UTF-8
+          & $compiler /in "main.ahk" /out "FolderJump.exe" /base "$ahkBase" /cp 65001
+          
+          if (Test-Path "FolderJump.exe") {
+              echo "Build success: FolderJump.exe"
+          } else {
+              throw "Build failed: FolderJump.exe not created."
+          }
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
