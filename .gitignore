@@ -1,5 +1,7 @@
-.VSCodeCounter/*
-logs/*
+.VSCodeCounter/
+.kiro/
+logs/
 config.ini
 FolderJump.exe
 build/build.bat
+swap.txt

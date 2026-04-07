@@ -84,6 +84,7 @@ BuildGroupedItems(pathCache, maxItems) {
     items         := []
     selectableMap := []
     fullPaths     := []
+    entryMap      := []
     firstSelectable := 0
 
     for groupIdx, src in groupOrder {
@@ -92,6 +93,7 @@ BuildGroupedItems(pathCache, maxItems) {
             items.Push(" ")
             selectableMap.Push(-1)
             fullPaths.Push("")
+            entryMap.Push("")
         }
 
         indices := groups[src]
@@ -114,6 +116,7 @@ BuildGroupedItems(pathCache, maxItems) {
         items.Push(header)
         selectableMap.Push(-1)
         fullPaths.Push("")
+        entryMap.Push("")
 
         ; 插入各路径行（方向A：树状结构模拟）
         totalCount := indices.Length
@@ -127,6 +130,7 @@ BuildGroupedItems(pathCache, maxItems) {
             items.Push(displayPath)
             selectableMap.Push(cacheIdx)
             fullPaths.Push(entry.path)
+            entryMap.Push(entry)
             
             ; 记录第一个可选行的位置
             if (firstSelectable = 0)
@@ -134,7 +138,7 @@ BuildGroupedItems(pathCache, maxItems) {
         }
     }
 
-    return {items: items, selectableMap: selectableMap, fullPaths: fullPaths, firstSelectable: firstSelectable}
+    return {items: items, selectableMap: selectableMap, fullPaths: fullPaths, entryMap: entryMap, firstSelectable: firstSelectable}
 }
 
 ; 显示路径选择器
@@ -190,6 +194,7 @@ ShowPathSelector(context, activeHwnd) {
     items           := grouped.items
     selectableMap   := grouped.selectableMap
     fullPaths       := grouped.fullPaths
+    entryMap        := grouped.entryMap
     firstSelectable := grouped.firstSelectable
 
     ; 根据 DPI 计算每行高度，11pt 字体约 27px
@@ -238,14 +243,15 @@ ShowPathSelector(context, activeHwnd) {
     pathGui.targetHwnd        := activeHwnd
     pathGui.selectableMap     := selectableMap
     pathGui.fullPaths         := fullPaths
+    pathGui.entryMap          := entryMap
     pathGui.previewBox        := previewBox
     pathGui.lastValidIndex    := firstSelectable  ; 最近一次落在可选行的 displayItems 索引
     pathGui.selectedIndex     := firstSelectable
 
     ; 绑定事件
-    pathGui.OnEvent("Escape", GuiEscape)
-    listBox.OnEvent("DoubleClick", ListBoxConfirm)
-    listBox.OnEvent("Change", ListBoxChange)
+    pathGui.OnEvent("Escape", GuiEscape.Bind(pathGui))
+    listBox.OnEvent("DoubleClick", ListBoxConfirm.Bind(pathGui))
+    listBox.OnEvent("Change", ListBoxChange.Bind(pathGui))
 
     ; 超时自动关闭
     timeout     := g_Config.auto_close_timeout * 1000
@@ -261,47 +267,66 @@ ShowPathSelector(context, activeHwnd) {
     ; 使用 InputHook 捕获 Enter 键，防止原始按键泄漏到目标窗口
     enterHook := InputHook("V")
     enterHook.KeyOpt("{Enter}", "NS")  ; N=Notify, S=Suppress
-    enterHook.OnKeyDown := ListBoxEnterPressed.Bind(listBox)
+    enterHook.OnKeyDown := ListBoxEnterPressed.Bind(listBox, pathGui)
     enterHook.Start()
     pathGui.enterHook := enterHook
 }
 
 ; ListBox 确认事件（双击时触发）
 ; 通过 selectableMap 还原真实 g_PathCache 索引，支持分组标题行存在时的正确跳转
-ListBoxConfirm(GuiCtrlObj, *) {
-    global g_CurrentGui, g_PathCache
+ListBoxConfirm(pathGui, GuiCtrlObj, *) {
     selectedIndex := GuiCtrlObj.Value
-    if (selectedIndex > 0 && g_CurrentGui.HasOwnProp("selectableMap")) {
-        cacheIdx := g_CurrentGui.selectableMap[selectedIndex]
-        ; 分组标题行的 cacheIdx 为 -1，需跳过
-        if (cacheIdx > 0 && cacheIdx <= g_PathCache.Length) {
-            entry      := g_PathCache[cacheIdx]
-            targetHwnd := g_CurrentGui.HasOwnProp("targetHwnd") ? g_CurrentGui.targetHwnd : 0
+    if (selectedIndex > 0 && pathGui.HasOwnProp("entryMap")) {
+        entry := pathGui.entryMap[selectedIndex]
+        if (IsObject(entry)) {
+            targetHwnd := pathGui.HasOwnProp("targetHwnd") ? pathGui.targetHwnd : 0
             LogInfo("用户选择路径(双击): " entry.path " [" entry.label "]")
-            CleanupGui(g_CurrentGui)
-            ExecutePathSwitch(entry, targetHwnd)
+                    ; 关闭 GUI 前先记录目标窗口的父窗口，用于模态对话框场景的恢复
+            ownerHwnd := DllCall("GetWindow", "Ptr", targetHwnd, "UInt", 4, "Ptr")  ; GW_OWNER=4
+            LogDebug("Target hwnd=" targetHwnd ", owner hwnd=" ownerHwnd)
+            CleanupGui(pathGui)
+            ; 等待目标窗口重新获得焦点（模态对话框在 GUI 关闭后需要时间恢复）
+            Sleep(150)
+            ; 验证目标窗口是否仍然存在
+            if (WinExist("ahk_id " targetHwnd)) {
+                LogDebug("Target window still exists after GUI close, proceeding")
+                ExecutePathSwitch(entry, targetHwnd)
+            } else if (ownerHwnd && WinExist("ahk_id " ownerHwnd)) {
+                ; 模态对话框被父窗口重新激活后可能重建，尝试在父窗口下寻找同类对话框
+                LogWarn("Target hwnd gone, trying to find modal dialog under owner: " ownerHwnd)
+                newDialogHwnd := FindModalDialogUnderOwner(ownerHwnd)
+                if (newDialogHwnd) {
+                    LogInfo("Found new dialog hwnd=" newDialogHwnd ", retrying switch")
+                    ExecutePathSwitch(entry, newDialogHwnd)
+                } else {
+                    LogWarn("No modal dialog found under owner, aborting")
+                    TrayTip("FolderJump", "目标窗口已关闭，跳转取消", 2000)
+                }
+            } else {
+                LogWarn("Target window no longer exists and no owner found: ahk_id " targetHwnd)
+                TrayTip("FolderJump", "目标窗口已关闭，跳转取消", 2000)
+            }
             return
         }
     }
-    CleanupGui(g_CurrentGui)
+    CleanupGui(pathGui)
 }
 
 ; ListBox 变更事件（键盘 ↑↓ 导航时触发）
 ; 自动跳过分组标题行，同时更新底部完整路径预览
-ListBoxChange(GuiCtrlObj, *) {
-    global g_CurrentGui
-    if (!IsSet(g_CurrentGui) || !g_CurrentGui)
+ListBoxChange(pathGui, GuiCtrlObj, *) {
+    if (!IsSet(pathGui) || !pathGui)
         return
 
     selectedIndex := GuiCtrlObj.Value
     if (selectedIndex <= 0)
         return
 
-    selectableMap := g_CurrentGui.selectableMap
+    selectableMap := pathGui.selectableMap
 
     ; 当前选中的是分组标题行（selectableMap 值为 -1），需要自动跳转到相邻的可选行
     if (selectableMap[selectedIndex] = -1) {
-        lastValid := g_CurrentGui.lastValidIndex
+        lastValid := pathGui.lastValidIndex
 
         if (selectedIndex > lastValid) {
             ; 用户向下移动：找当前位置之后最近的可选行
@@ -320,40 +345,54 @@ ListBoxChange(GuiCtrlObj, *) {
     }
 
     ; 正常可选行：更新状态和底部完整路径预览
-    g_CurrentGui.lastValidIndex := selectedIndex
-    g_CurrentGui.selectedIndex  := selectedIndex
+    pathGui.lastValidIndex := selectedIndex
+    pathGui.selectedIndex  := selectedIndex
 
-    if (g_CurrentGui.HasOwnProp("fullPaths") &&
-        g_CurrentGui.HasOwnProp("previewBox") &&
-        selectedIndex <= g_CurrentGui.fullPaths.Length) {
-        fullPath := g_CurrentGui.fullPaths[selectedIndex]
+    if (pathGui.HasOwnProp("fullPaths") &&
+        pathGui.HasOwnProp("previewBox") &&
+        selectedIndex <= pathGui.fullPaths.Length) {
+        fullPath := pathGui.fullPaths[selectedIndex]
         if (fullPath != "")
-            g_CurrentGui.previewBox.Value := fullPath
+            pathGui.previewBox.Value := fullPath
     }
 }
 
 ; Enter 键确认（通过 InputHook 捕获）
-; 通过 selectableMap 还原真实 g_PathCache 索引，执行路径跳转并关闭 GUI
-ListBoxEnterPressed(listBox, hook, vk, sc, *) {
-    global g_CurrentGui, g_PathCache
+; 通过 selectableMap 还原真实路径对象，执行路径跳转并关闭 GUI
+ListBoxEnterPressed(listBox, pathGui, hook, vk, sc, *) {
     if (vk = 13) {
         try {
             selectedIndex := listBox.Value
-            if (selectedIndex > 0 && g_CurrentGui.HasOwnProp("selectableMap")) {
-                cacheIdx := g_CurrentGui.selectableMap[selectedIndex]
-                ; 分组标题行的 cacheIdx 为 -1，需跳过
-                if (cacheIdx > 0 && cacheIdx <= g_PathCache.Length) {
-                    entry      := g_PathCache[cacheIdx]
-                    targetHwnd := g_CurrentGui.HasOwnProp("targetHwnd") ? g_CurrentGui.targetHwnd : 0
+            if (selectedIndex > 0 && pathGui.HasOwnProp("entryMap")) {
+                entry := pathGui.entryMap[selectedIndex]
+                if (IsObject(entry)) {
+                    targetHwnd := pathGui.HasOwnProp("targetHwnd") ? pathGui.targetHwnd : 0
                     LogInfo("用户选择路径(Enter): " entry.path " [" entry.label "]")
 
                     ; 先清理 GUI，释放 InputHook 并恢复目标窗口焦点
-                    CleanupGui(g_CurrentGui)
+                    ownerHwnd := DllCall("GetWindow", "Ptr", targetHwnd, "UInt", 4, "Ptr")
+                    CleanupGui(pathGui)
 
                     ; 等待用户松开 Enter，杜绝回车残留事件导致目标对话框关闭
                     KeyWait("Enter")
 
-                    ExecutePathSwitch(entry, targetHwnd)
+                    ; 等待目标窗口重新获得焦点（模态对话框在 GUI 关闭后需要时间恢复）
+                    Sleep(150)
+
+                    ; 验证目标窗口仍然存在，避免模态对话框被父窗口销毁的情况
+                    if (WinExist("ahk_id " targetHwnd)) {
+                        ExecutePathSwitch(entry, targetHwnd)
+                    } else if (ownerHwnd && WinExist("ahk_id " ownerHwnd)) {
+                        LogWarn("Target hwnd gone (Enter), trying owner: " ownerHwnd)
+                        newDialogHwnd := FindModalDialogUnderOwner(ownerHwnd)
+                        if (newDialogHwnd)
+                            ExecutePathSwitch(entry, newDialogHwnd)
+                        else
+                            TrayTip("FolderJump", "目标窗口已关闭，跳转取消", 2000)
+                    } else {
+                        LogWarn("Target window no longer exists after GUI close: ahk_id " targetHwnd)
+                        TrayTip("FolderJump", "目标窗口已关闭，跳转取消", 2000)
+                    }
                 }
             }
         }
@@ -392,7 +431,26 @@ GuiAutoClose(pathGui) {
     CleanupGui(g_CurrentGui)
 }
 
-; 清理 GUI 资源（停止定时器、InputHook，销毁 GUI）
+; 在指定父窗口下寻找模态对话框（#32770 类）
+; 用于处理模态对话框 hwnd 在 FolderJump GUI 关闭后被重建的情况
+FindModalDialogUnderOwner(ownerHwnd) {
+    ; 枚举所有 #32770 窗口，找到 owner 匹配的那个
+    foundHwnd := 0
+    hwnd := 0
+    Loop {
+        hwnd := DllCall("FindWindowEx", "Ptr", 0, "Ptr", hwnd, "Str", "#32770", "Ptr", 0, "Ptr")
+        if (!hwnd)
+            break
+        owner := DllCall("GetWindow", "Ptr", hwnd, "UInt", 4, "Ptr")  ; GW_OWNER=4
+        if (owner = ownerHwnd) {
+            foundHwnd := hwnd
+            break
+        }
+    }
+    return foundHwnd
+}
+
+
 ; 在所有关闭路径中统一调用，确保资源正确释放
 CleanupGui(pathGui) {
     global g_CurrentGui
