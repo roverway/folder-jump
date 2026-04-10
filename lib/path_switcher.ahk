@@ -55,7 +55,6 @@ ExecutePathSwitch(entry, targetHwnd := 0) {
 
 SwitchFileDialog(hwnd, targetPath) {
     ; 【特权层】：Edit1 快速跳转（仅限另存为对话框，极致丝滑 0 闪烁）
-    ; 只要是保存类对话框，优先用它。如果是打开类对话框，它内部会自动返回 "skip"
     if (WinExist("ahk_id " hwnd)) {
         result := TryNavigateViaEdit1(hwnd, targetPath)
         if (result = "ok")
@@ -64,7 +63,6 @@ SwitchFileDialog(hwnd, targetPath) {
             TrayTip("FolderJump", "跳转失败：对话框已关闭，请重新打开后再试", 3000)
             return false
         }
-        ; 如果返回 "skip" (打开对话框) 或 "failed"，继续往下走
     }
 
     ; 【通用层 0】：纯 UIA 直接操作（打开/保存通用，会有一次地址栏展开视觉动画）
@@ -89,6 +87,20 @@ SwitchFileDialog(hwnd, targetPath) {
         }
     }
 
+    ; ======= 新增补丁：【绝境层】：老式“打开”对话框强行兜底 =======
+    ; 当 UIA 和 Alt+D 都找不到地址栏时，说明这是 Ahk2Exe 这种远古风格对话框。
+    ; 此时无视打开对话框的误关风险，强行向 Edit1 写入带反斜杠的路径并回车。
+    if (WinExist("ahk_id " hwnd)) {
+        result := TryNavigateLegacyOpenDialog(hwnd, targetPath)
+        if (result = "ok")
+            return true
+        if (result = "closed") {
+            TrayTip("FolderJump", "跳转失败：对话框已关闭，请重新打开后再试", 3000)
+            return false
+        }
+    }
+    ; ================================================================
+
     ; 【最终层】：全局按键模拟兜底
     if (WinExist("ahk_id " hwnd))
         return SwitchFileDialogFallback(hwnd, targetPath)
@@ -99,18 +111,15 @@ SwitchFileDialog(hwnd, targetPath) {
 ; ============================================================
 ; 层0：纯 UIA 直接操作（最快，无键盘模拟）
 ; ============================================================
-;
-; 原理：通过 Windows 内置 IUIAutomation COM 接口直接定位
-; 地址栏 Edit 控件，用 SetFocus 激活编辑模式，用 ValuePattern
-; 设置路径文本，用 ControlSend 发 Enter 完成导航。
-; 全程不使用 Send() 全局按键，无竞态风险。
-;
-; 返回值："ok" / "closed" / "failed"
-
 TryNavigateViaUIA(hwnd, targetPath) {
     LogDebug("Try UIA direct navigation: " targetPath)
     try {
-        ; 初始化 UI Automation（Windows 内置，无需外部库）
+        ; ================= 关键修复 1 =================
+        ; 必须先激活目标对话框！否则双击 GUI 时，Enter 会打在其他按钮上
+        if (!ActivateTargetWindow(hwnd))
+            return "failed"
+        ; ==============================================
+
         UIA := ComObject("UIAutomationClient.CUIAutomation")
         if (!UIA)
             return "failed"
@@ -119,22 +128,17 @@ TryNavigateViaUIA(hwnd, targetPath) {
         if (!rootEl)
             return "failed"
 
-        ; UIA 常量定义
         UIA_ControlTypePropertyId := 30003
         UIA_ComboBoxControlTypeId := 50003
         UIA_EditControlTypeId := 50004
         TreeScope_Descendants := 4
         TreeScope_Children := 2
 
-        ; 策略：找地址栏的 ComboBox（排除文件名和文件类型的 ComboBox）
-        ; 标准文件对话框中地址栏是 "Previous Locations" / "以前的位置" ComboBox
         comboCond := UIA.CreatePropertyCondition(UIA_ControlTypePropertyId, UIA_ComboBoxControlTypeId)
         combos := rootEl.FindAll(TreeScope_Descendants, comboCond)
 
-        if (!combos || combos.Length = 0) {
-            LogDebug("UIA: no ComboBox found")
+        if (!combos || combos.Length = 0)
             return "failed"
-        }
 
         addressCombo := ""
         editCond := UIA.CreatePropertyCondition(UIA_ControlTypePropertyId, UIA_EditControlTypeId)
@@ -145,21 +149,18 @@ TryNavigateViaUIA(hwnd, targetPath) {
             try comboName := el.CurrentName
             lowerName := StrLower(comboName)
 
-            ; 排除文件名输入框和文件类型筛选的 ComboBox
             if (InStr(lowerName, "file name") || InStr(lowerName, "文件名"))
                 continue
             if (InStr(lowerName, "file type") || InStr(lowerName, "文件类型")
                 || InStr(lowerName, "save as type") || InStr(lowerName, "保存类型"))
                 continue
 
-            ; 匹配地址栏关键词
             if (InStr(lowerName, "previous") || InStr(lowerName, "以前")
                 || InStr(lowerName, "address") || InStr(lowerName, "地址")) {
                 addressCombo := el
                 break
             }
 
-            ; 兜底：检查该 ComboBox 内是否有包含路径的 Edit 子元素
             try {
                 childEdit := el.FindFirst(TreeScope_Children, editCond)
                 if (childEdit) {
@@ -173,93 +174,90 @@ TryNavigateViaUIA(hwnd, targetPath) {
             }
         }
 
-        if (!addressCombo) {
-            LogDebug("UIA: address bar ComboBox not found")
+        if (!addressCombo)
             return "failed"
-        }
 
-        ; 在地址栏 ComboBox 中找 Edit 子元素
         addressEdit := ""
         try addressEdit := addressCombo.FindFirst(TreeScope_Descendants, editCond)
-        if (!addressEdit) {
-            LogDebug("UIA: Edit not found in address bar")
+        if (!addressEdit)
             return "failed"
-        }
 
-        ; 聚焦地址栏 Edit（触发面包屑→编辑模式转换）
+        ; 聚焦地址栏，将其从面包屑转换为 Edit
         try addressEdit.SetFocus()
-        Sleep(50)
+        Sleep(60) ; 稍微加长等待，确保动画转换完成
 
         if (!WinExist("ahk_id " hwnd))
             return "closed"
 
-        ; 设置路径文本：优先用 ValuePattern，降级用 ControlSetText
         valueSet := false
         try {
-            ; UIA_ValuePatternId = 10002
             valPattern := addressEdit.GetCurrentPattern(10002)
             if (valPattern) {
-                ; IUIAutomationValuePattern::SetValue (vtable index 3)
                 ComCall(3, valPattern, "WStr", targetPath)
                 valueSet := true
-                LogDebug("UIA: path set via ValuePattern")
             }
         }
 
         if (!valueSet) {
-            ; 降级：通过控件句柄用 ControlSetText
             try {
                 nativeHwnd := addressEdit.CurrentNativeWindowHandle
                 if (nativeHwnd) {
-                    ControlSetText(targetPath, "ahk_id " nativeHwnd)
+                    ; ================= 关键修复 2 =================
+                    ; AHK v2 语法：ControlSetText(String, Control, WinTitle)
+                    ; 必须留空 Control 参数，并将 ahk_id 放在 WinTitle 位置
+                    ControlSetText(targetPath, nativeHwnd)
                     valueSet := true
-                    LogDebug("UIA: path set via ControlSetText fallback")
+                    ; ==============================================
                 }
             }
         }
 
         if (!valueSet) {
-            ; 再降级：用当前焦点控件
             focusedCtrl := GetFocusedControlSafe(hwnd)
             if (focusedCtrl) {
                 try {
                     ControlSetText(targetPath, focusedCtrl, "ahk_id " hwnd)
                     valueSet := true
-                    LogDebug("UIA: path set via focused control fallback")
                 }
             }
         }
 
-        if (!valueSet) {
-            LogDebug("UIA: failed to set path text")
+        if (!valueSet)
             return "failed"
-        }
 
         Sleep(30)
 
-        ; 发送 Enter 触发导航
-        focusedCtrl := GetFocusedControlSafe(hwnd)
-        if (focusedCtrl)
-            ControlSend("{Enter}", focusedCtrl, "ahk_id " hwnd)
-        else
-            Send("{Enter}")
+        ; ================= 关键修复 3 =================
+        ; 发送 Enter 触发导航.精准向地址栏发送 Enter，而不是向整个窗口发送，防止误触“打开”按钮
+        nativeHwnd := 0
+        try nativeHwnd := addressEdit.CurrentNativeWindowHandle
+        
+        if (nativeHwnd) {
+            ; ✅ 直接传入控件句柄
+            ControlSend("{Enter}", nativeHwnd)
+        } else {
+            focusedCtrl := GetFocusedControlSafe(hwnd)
+            if (focusedCtrl)
+                ControlSend("{Enter}", focusedCtrl, "ahk_id " hwnd)
+            else
+                ; ✅ 如果没有控件句柄，直接把窗口句柄传给它，发送给目标窗口
+                ControlSend("{Enter}", hwnd)
+        }
+        ; ==============================================
 
-        Sleep(80)
+        Sleep(100)
         if (!WinExist("ahk_id " hwnd)) {
             LogWarn("UIA: dialog closed after Enter")
             return "closed"
         }
 
-        ; 验证导航结果
         if (WaitForFileDialogPath(hwnd, targetPath, 1.0)) {
             LogInfo("UIA direct navigation succeeded: " targetPath)
             return "ok"
         }
 
-        LogDebug("UIA: navigation could not be verified")
         return "failed"
-    } catch as err {
-        LogDebug("UIA navigation failed: " err.Message)
+    } catch {
         return "failed"
     }
 }
@@ -441,6 +439,55 @@ SwitchFileDialogFallback(hwnd, targetPath) {
         TrayTip("FolderJump", "跳转失败: " err.Message, 3000)
         RestoreClipboard(savedClipboard)
         return false
+    }
+}
+
+
+; ============================================================
+; 绝境层：老式“打开”对话框强制 Edit1 兜底
+; ============================================================
+TryNavigateLegacyOpenDialog(hwnd, targetPath) {
+    LogDebug("Try Legacy Open Dialog Edit1 Fallback")
+    
+    ; 必须以反斜杠结尾，这是强迫老式对话框跳目录的秘诀
+    navPath := targetPath
+    if (SubStr(navPath, -1) != "\")
+        navPath .= "\"
+
+    try {
+        if (!ActivateTargetWindow(hwnd))
+            return "failed"
+
+        editControl := "Edit1"
+        try ControlGetStyle(editControl, "ahk_id " hwnd)
+        catch 
+            return "failed"
+
+        originalText := GetControlTextSafe(editControl, hwnd)
+        
+        ControlFocus(editControl, "ahk_id " hwnd)
+        ControlSetText(navPath, editControl, "ahk_id " hwnd)
+        
+        ; 老式对话框需要给 EN_CHANGE 事件一点反应时间
+        Sleep(60) 
+        
+        ControlSend("{Enter}", editControl, "ahk_id " hwnd)
+        
+        Sleep(100)
+        if (!WinExist("ahk_id " hwnd)) {
+            LogWarn("Legacy fallback: dialog closed unexpectedly")
+            return "closed"
+        }
+
+        if (WaitForFileDialogPath(hwnd, targetPath, 1.0)) {
+            ControlSetText(originalText, editControl, "ahk_id " hwnd)
+            LogInfo("Legacy Open Dialog navigation succeeded: " targetPath)
+            return "ok"
+        }
+        
+        return "failed"
+    } catch {
+        return "failed"
     }
 }
 
