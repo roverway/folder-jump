@@ -1,4 +1,5 @@
 .VSCodeCounter/
+.vscode
 .kiro/
 logs/
 config.ini
