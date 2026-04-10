@@ -109,7 +109,7 @@ SwitchFileDialog(hwnd, targetPath) {
 }
 
 ; ============================================================
-; 层0：非 UIA 直接操作（绕过权限限制）
+; 层0：非 UIA 直接操作（绕过权限限制，使用剪贴板模拟）
 ; ============================================================
 TryNavigateViaUIA(hwnd, targetPath) {
     LogDebug("Try non-UIA direct navigation: " targetPath)
@@ -147,13 +147,16 @@ TryNavigateViaUIA(hwnd, targetPath) {
             return "failed"
         }
 
-        ; 使用 SendMessage 设置文本（WM_SETTEXT = 0x000C）
-        SendMessage(0x000C, 0, StrPtr(targetPath), editHwnd)
-
-        Sleep(30)
-
-        ; 使用 PostMessage 发送 Enter（WM_KEYDOWN = 0x0100, VK_RETURN = 0x0D）
-        PostMessage(0x0100, 0x0D, 0, editHwnd)
+        ; 使用剪贴板 + ControlSend 绕过 UIPI 限制
+        bak := ClipboardAll()
+        A_Clipboard := targetPath
+        if ClipWait(1) {
+            ControlFocus(addressEditCtrl, "ahk_id " hwnd)
+            ControlSend("^v", addressEditCtrl, "ahk_id " hwnd)  ; Ctrl+V 粘贴路径
+            Sleep(50)
+            ControlSend("{Enter}", addressEditCtrl, "ahk_id " hwnd)  ; 发送 Enter
+        }
+        A_Clipboard := bak
 
         Sleep(100)
         if (!WinExist("ahk_id " hwnd)) {

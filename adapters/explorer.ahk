@@ -24,11 +24,21 @@ CollectExplorerPaths() {
                 continue
 
             ; 获取文件夹路径
-            folder := window.Document.Folder
-            if (!IsSet(folder) || !folder)
-                continue
+            try {
+                folder := window.Document.Folder
+            } catch {
+                folder := ""
+            }
 
-            path := folder.Self.Path
+            path := ""
+            if (IsSet(folder) && folder)
+                try path := folder.Self.Path
+                catch
+                    path := ""
+
+            if (!path || path = "")
+                path := GetExplorerPathFromHwnd(window.hwnd)
+
             if (!path || path = "")
                 continue
 
@@ -51,6 +61,30 @@ CollectExplorerPaths() {
 
     LogDebug("Explorer 路径收集: " paths.Length " 个窗口")
     return paths
+}
+
+GetExplorerPathFromHwnd(hwnd) {
+    try {
+        shell := ComObject("Shell.Application")
+        for window in shell.Windows {
+            try {
+                if (window.hwnd = hwnd) {
+                    try {
+                        path := window.Document.Folder.Self.Path
+                        if (path && path != "")
+                            return path
+                    } catch {
+                        continue
+                    }
+                }
+            } catch {
+                continue
+            }
+        }
+    } catch {
+    }
+
+    return ""
 }
 
 ; 判断是否为虚拟文件夹

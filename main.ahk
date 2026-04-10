@@ -31,7 +31,13 @@ g_PathCache := []
 g_CurrentGui := ""
 g_IsRefreshing := false
 
+if !A_IsAdmin {
+    Run('*RunAs "' A_ScriptFullPath '"')
+    ExitApp
+}
+
 InitLogs()
+RegisterMessageFilters()
 LogInfo("FolderJump v0.1.0 startup begin")
 
 g_Config := LoadConfig()
@@ -41,3 +47,18 @@ ReloadHotkey()
 InitWindowMonitor()
 
 LogInfo("FolderJump startup complete")
+
+RegisterMessageFilters() {
+    static MSGFLT_ALLOW := 1
+    messages := [0x000C, 0x0100, 0x0101, 0x0302]
+
+    for msg in messages {
+        try {
+            DllCall("User32.dll\ChangeWindowMessageFilterEx", "Ptr", A_ScriptHwnd, "UInt", msg, "UInt", MSGFLT_ALLOW, "Ptr", 0)
+            LogDebug("Allowed message through UIPI filter: " msg)
+        } catch as err {
+            LogWarn("ChangeWindowMessageFilterEx unavailable or failed for msg " msg ": " err.Message)
+        }
+    }
+}
+

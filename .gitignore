@@ -6,3 +6,4 @@ config.ini
 FolderJump.exe
 build/build.bat
 swap.txt
+main.ahk
