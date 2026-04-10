@@ -109,150 +109,60 @@ SwitchFileDialog(hwnd, targetPath) {
 }
 
 ; ============================================================
-; 层0：纯 UIA 直接操作（最快，无键盘模拟）
+; 层0：非 UIA 直接操作（绕过权限限制）
 ; ============================================================
 TryNavigateViaUIA(hwnd, targetPath) {
-    LogDebug("Try UIA direct navigation: " targetPath)
+    LogDebug("Try non-UIA direct navigation: " targetPath)
     try {
-        ; ================= 关键修复 1 =================
-        ; 必须先激活目标对话框！否则双击 GUI 时，Enter 会打在其他按钮上
+        ; 激活目标对话框
         if (!ActivateTargetWindow(hwnd))
             return "failed"
-        ; ==============================================
 
-        UIA := ComObject("UIAutomationClient.CUIAutomation")
-        if (!UIA)
-            return "failed"
+        ; 发送 Alt+D 激活地址栏编辑模式
+        Send("!d")
 
-        rootEl := UIA.ElementFromHandle(hwnd)
-        if (!rootEl)
-            return "failed"
-
-        UIA_ControlTypePropertyId := 30003
-        UIA_ComboBoxControlTypeId := 50003
-        UIA_EditControlTypeId := 50004
-        TreeScope_Descendants := 4
-        TreeScope_Children := 2
-
-        comboCond := UIA.CreatePropertyCondition(UIA_ControlTypePropertyId, UIA_ComboBoxControlTypeId)
-        combos := rootEl.FindAll(TreeScope_Descendants, comboCond)
-
-        if (!combos || combos.Length = 0)
-            return "failed"
-
-        addressCombo := ""
-        editCond := UIA.CreatePropertyCondition(UIA_ControlTypePropertyId, UIA_EditControlTypeId)
-
-        Loop combos.Length {
-            el := combos.GetElement(A_Index - 1)
-            comboName := ""
-            try comboName := el.CurrentName
-            lowerName := StrLower(comboName)
-
-            if (InStr(lowerName, "file name") || InStr(lowerName, "文件名"))
-                continue
-            if (InStr(lowerName, "file type") || InStr(lowerName, "文件类型")
-                || InStr(lowerName, "save as type") || InStr(lowerName, "保存类型"))
-                continue
-
-            if (InStr(lowerName, "previous") || InStr(lowerName, "以前")
-                || InStr(lowerName, "address") || InStr(lowerName, "地址")) {
-                addressCombo := el
+        ; 等待地址栏 Edit 获得焦点（通常 40-80ms 即完成，最多等 300ms）
+        addressEditCtrl := ""
+        startTime := A_TickCount
+        Loop {
+            if (A_TickCount - startTime > 300)
+                break
+            if (!WinExist("ahk_id " hwnd))
+                return "closed"
+            focused := GetFocusedControlSafe(hwnd)
+            if (focused && InStr(StrLower(GetControlClassSafe(focused, hwnd)), "edit")) {
+                addressEditCtrl := focused
                 break
             }
-
-            try {
-                childEdit := el.FindFirst(TreeScope_Children, editCond)
-                if (childEdit) {
-                    editVal := ""
-                    try editVal := childEdit.GetCurrentPropertyValue(30045)
-                    if (editVal && InStr(editVal, "\") && InStr(editVal, ":")) {
-                        addressCombo := el
-                        break
-                    }
-                }
-            }
+            Sleep(20)
         }
 
-        if (!addressCombo)
+        if (!addressEditCtrl)
             return "failed"
 
-        addressEdit := ""
-        try addressEdit := addressCombo.FindFirst(TreeScope_Descendants, editCond)
-        if (!addressEdit)
-            return "failed"
-
-        ; 聚焦地址栏，将其从面包屑转换为 Edit
-        try addressEdit.SetFocus()
-        Sleep(60) ; 稍微加长等待，确保动画转换完成
-
-        if (!WinExist("ahk_id " hwnd))
-            return "closed"
-
-        valueSet := false
+        ; 获取地址栏 Edit 控件的句柄
         try {
-            valPattern := addressEdit.GetCurrentPattern(10002)
-            if (valPattern) {
-                ComCall(3, valPattern, "WStr", targetPath)
-                valueSet := true
-            }
-        }
-
-        if (!valueSet) {
-            try {
-                nativeHwnd := addressEdit.CurrentNativeWindowHandle
-                if (nativeHwnd) {
-                    ; ================= 关键修复 2 =================
-                    ; AHK v2 语法：ControlSetText(String, Control, WinTitle)
-                    ; 必须留空 Control 参数，并将 ahk_id 放在 WinTitle 位置
-                    ControlSetText(targetPath, nativeHwnd)
-                    valueSet := true
-                    ; ==============================================
-                }
-            }
-        }
-
-        if (!valueSet) {
-            focusedCtrl := GetFocusedControlSafe(hwnd)
-            if (focusedCtrl) {
-                try {
-                    ControlSetText(targetPath, focusedCtrl, "ahk_id " hwnd)
-                    valueSet := true
-                }
-            }
-        }
-
-        if (!valueSet)
+            editHwnd := ControlGetHwnd(addressEditCtrl, "ahk_id " hwnd)
+        } catch {
             return "failed"
+        }
+
+        ; 使用 SendMessage 设置文本（WM_SETTEXT = 0x000C）
+        SendMessage(0x000C, 0, StrPtr(targetPath), editHwnd)
 
         Sleep(30)
 
-        ; ================= 关键修复 3 =================
-        ; 发送 Enter 触发导航.精准向地址栏发送 Enter，而不是向整个窗口发送，防止误触“打开”按钮
-        nativeHwnd := 0
-        try nativeHwnd := addressEdit.CurrentNativeWindowHandle
-        
-        if (nativeHwnd) {
-            ; ✅ 直接传入控件句柄
-            ControlSend("{Enter}", nativeHwnd)
-        } else {
-            focusedCtrl := GetFocusedControlSafe(hwnd)
-            if (focusedCtrl)
-                ControlSend("{Enter}", focusedCtrl, "ahk_id " hwnd)
-            else
-                ; ✅ 如果没有控件句柄，直接把窗口句柄传给它，发送给目标窗口
-                ControlSend("{Enter}", hwnd)
-        }
-        ; ==============================================
+        ; 使用 PostMessage 发送 Enter（WM_KEYDOWN = 0x0100, VK_RETURN = 0x0D）
+        PostMessage(0x0100, 0x0D, 0, editHwnd)
 
         Sleep(100)
         if (!WinExist("ahk_id " hwnd)) {
-            LogWarn("UIA: dialog closed after Enter")
+            LogWarn("Non-UIA: dialog closed after Enter")
             return "closed"
         }
 
         if (WaitForFileDialogPath(hwnd, targetPath, 1.0)) {
-            LogInfo("UIA direct navigation succeeded: " targetPath)
+            LogInfo("Non-UIA direct navigation succeeded: " targetPath)
             return "ok"
         }
 
