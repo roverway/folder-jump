@@ -11,6 +11,7 @@ InitWindowMonitor() {
     interval := g_Config.poll_interval
     SetTimer(RefreshPaths, interval)
     LogDebug("Window monitor timer started: interval=" interval "ms")
+    RefreshPaths()
 }
 
 StopWindowMonitor() {

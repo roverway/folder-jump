@@ -125,6 +125,7 @@ ReloadHotkey() {
     try {
         Hotkey(g_Config.hotkey, OnCtrlG)
         LogInfo("Hotkey registered: " g_Config.hotkey)
+        RegisterMessageFilters()
         return true
     } catch as err {
         LogWarn("Hotkey registration failed: " g_Config.hotkey ", error=" err.Message)

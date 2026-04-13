@@ -153,8 +153,16 @@ ShowPathSelector(context, activeHwnd) {
     global g_PathCache, g_Config, g_CurrentGui
 
     if (g_PathCache.Length = 0) {
-        TrayTip("FolderJump", "没有打开的文件夹窗口", 2000)
-        return
+        ; 如果首次缓存为空，再次刷新一次路径列表
+        try {
+            RefreshPaths()
+        } catch {
+            LogWarn("RefreshPaths failed during hotkey selection")
+        }
+        if (g_PathCache.Length = 0) {
+            TrayTip("FolderJump", "没有打开的文件夹窗口", 2000)
+            return
+        }
     }
 
     ; 如果只有一个可选路径，直接跳转，不再显示选择菜单
@@ -376,6 +384,11 @@ ListBoxEnterPressed(listBox, pathGui, hook, vk, sc, *) {
                     ; 等待用户松开 Enter，杜绝回车残留事件导致目标对话框关闭
                     KeyWait("Enter")
 
+                    ; 确保 InputHook 停止，避免重复触发或干扰目标窗口
+                    if (pathGui.HasOwnProp("enterHook")) {
+                        try pathGui.enterHook.Stop()
+                    }
+
                     ; 等待目标窗口重新获得焦点（模态对话框在 GUI 关闭后需要时间恢复）
                     Sleep(150)
 
@@ -456,20 +469,26 @@ CleanupGui(pathGui) {
     global g_CurrentGui
     if (!IsSet(g_CurrentGui) || !g_CurrentGui)
         return
+    if (!IsSet(pathGui) || !pathGui)
+        return
+    if (g_CurrentGui != pathGui)
+        return
+
+    ; 先清除全局引用，避免重入和竞态
+    g_CurrentGui := ""
+
     ; 停止超时定时器（如果存在）
-    if (IsSet(pathGui) && pathGui && pathGui.HasOwnProp("autoCloseTimer")) {
+    if (pathGui.HasOwnProp("autoCloseTimer")) {
         try SetTimer(pathGui.autoCloseTimer, 0)
     }
     ; 停止焦点检测定时器（如果存在）
-    if (IsSet(pathGui) && pathGui && pathGui.HasOwnProp("focusCheckTimer")) {
+    if (pathGui.HasOwnProp("focusCheckTimer")) {
         try SetTimer(pathGui.focusCheckTimer, 0)
     }
     ; 停止 InputHook（如果存在）
-    if (IsSet(pathGui) && pathGui && pathGui.HasOwnProp("enterHook")) {
+    if (pathGui.HasOwnProp("enterHook")) {
         try pathGui.enterHook.Stop()
     }
     ; 销毁 GUI
     try pathGui.Destroy()
-    ; 清除全局引用
-    g_CurrentGui := ""
 }
